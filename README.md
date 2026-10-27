@@ -2,7 +2,7 @@
 
 An advisor-facing Q&A assistant for educational questions about Section 1031 exchanges, Delaware Statutory Trusts (DSTs), and Section 721 contributions to a REIT operating partnership (often described as a “721 exchange”).
 
-> **Status:** This repository contains a Django project connected to Supabase PostgreSQL and the (empty) document schema for the assistant. There is no chatbot, ingestion, or retrieval code yet. The linked sources below are the planned public reference set; they have not been downloaded, indexed, or used by an assistant.
+> **Status:** This repository contains a Django project on Supabase PostgreSQL with sign-in, an empty document schema, and a chat workspace that is not yet connected to an assistant. There is no answer generation, ingestion, or retrieval code yet. The linked sources below are the planned public reference set; they have not been downloaded, indexed, or used by an assistant.
 
 ## Part 1: Advisor Q&A assistant
 
@@ -35,9 +35,43 @@ Revenue Ruling 2004-86 applies to the facts it describes, and the SEC filing ill
 
 ## Current state and next steps
 
-The database schema for approved documents and their passages exists (see [Development setup](#development-setup)). The chat app, login, source ingestion and retrieval, passage-level citations, advice-request handling, answer disclaimer, admin log, and deployment are not implemented yet.
+Implemented (see [Development setup](#development-setup)):
+
+- Sign-in and sign-out using Django's built-in authentication, with sessions stored in Supabase PostgreSQL.
+- A protected chat workspace with a sidebar, a "New chat" action, suggested questions, a message composer, and a user menu.
+- The database schema for approved documents and their passages.
+
+Current chatbot limitations:
+
+- The assistant is not connected. The workspace says so, and its Send button is disabled; no question is sent and no answer is generated.
+- Selecting a suggested question only fills the message box.
+- "New chat" reloads an empty workspace. Conversation history is a placeholder; nothing is stored.
+
+Not implemented yet: source ingestion and retrieval, passage-level citations, answer generation, advice-request handling, the admin-only conversation log, and deployment.
 
 Next, build the small chat application, ingest and keep the approved sources current, return citations to the specific supporting passages, and implement the guardrails and admin-only log described above. Then evaluate answers for supported questions, questions outside the source set, and personalized advice requests before deploying it.
+
+## Screenshots
+
+The workspace screenshots show a sample signed-in user.
+
+### Sign in
+
+![Sign-in page on desktop: the form on the left and the approved source list on the right](docs/screenshots/login-desktop.png)
+
+A failed sign-in shows field-level messages:
+
+![Sign-in page showing a required-field error under the password](docs/screenshots/login-error-desktop.png)
+
+### Chat workspace
+
+![Chat workspace on desktop: sidebar with New chat and conversation placeholder, welcome question, not-connected notice, suggested questions, and disabled composer](docs/screenshots/workspace-desktop.png)
+
+### Mobile
+
+| Sign in | Workspace | Navigation drawer |
+| --- | --- | --- |
+| <img src="docs/screenshots/login-mobile.png" alt="Sign-in page on a phone" width="240"> | <img src="docs/screenshots/workspace-mobile.png" alt="Chat workspace on a phone" width="240"> | <img src="docs/screenshots/workspace-mobile-menu.png" alt="Workspace navigation drawer open on a phone" width="240"> |
 
 ## Development setup
 
@@ -84,6 +118,35 @@ python manage.py showmigrations              # lists applied/unapplied migration
 python manage.py migrate                     # applies Django and chatbot migrations
 ```
 
+### Run the app
+
+```bash
+python manage.py runserver
+```
+
+| Route | Name | Access | Purpose |
+| --- | --- | --- | --- |
+| `/` | `chatbot:workspace` | Signed-in users | Chat workspace (GET only) |
+| `/accounts/login/` | `login` | Everyone | Sign-in page; signed-in users are redirected to `/` |
+| `/accounts/logout/` | `logout` | Signed-in users | Sign out (POST with CSRF token only) |
+| `/admin/` | `admin:index` | Staff users | Django admin |
+
+Anonymous visitors are redirected to the sign-in page, and `next` redirects only go to this site. Session cookies are HttpOnly, last 8 hours, and are marked secure when `DEBUG` is off. There is no public registration or password reset; accounts are managed by an administrator.
+
+### User accounts
+
+Accounts live in Django's `auth_user` table in Supabase. To create an administrator, run this interactive command; it prompts for the password, so the password never appears in files or shell history:
+
+```bash
+python manage.py createsuperuser
+```
+
+Create regular users from the Django admin, or with Django's `User.objects.create_user()` in `python manage.py shell`. Both hash the password, and new users get `is_staff=False` and `is_superuser=False`. Regular users can use the workspace but not the admin. Never put real usernames or passwords in this repository.
+
+### Frontend
+
+Pages are Django templates styled with Bootstrap 5.3 (loaded from jsDelivr with integrity hashes) and the Sightbridge design system in `static/css/sightbridge.css`. The four brand colors are CSS variables there. Shared layout lives in `templates/base.html` and `templates/components/`. `static/js/sightbridge.js` adds the password visibility toggle, composer auto-resize, and suggested-question fill. The mobile navigation uses Bootstrap's offcanvas component.
+
 ### Schema
 
 The `chatbot` app owns the two document models in `chatbot/models.py`. Django migrations are the source of truth for this schema.
@@ -96,13 +159,13 @@ The `chatbot` app owns the two document models in `chatbot/models.py`. Django mi
 ### Tests
 
 ```bash
-python manage.py test chatbot
+python manage.py test
 ```
 
-Database tests run in a temporary `test_postgres` database on the configured server. The real database is not touched, and the temporary one is dropped afterwards. This works with the Supabase session pooler: `config/test_runner.py` drops the test database with `WITH (FORCE)`, because the pooler keeps a connection to it open. A local PostgreSQL server also works:
+This covers sign-in, sign-out, workspace access, admin separation, user creation, the database configuration, and the document schema. Database tests run in a temporary `test_postgres` database on the configured server. The real database is not touched, and the temporary one is dropped afterwards. This works with the Supabase session pooler: `config/test_runner.py` drops the test database with `WITH (FORCE)`, because the pooler keeps a connection to it open. A local PostgreSQL server also works:
 
 ```bash
-DATABASE_URL=postgresql://postgres:YOUR_LOCAL_PASSWORD@localhost:5432/postgres DB_SSLMODE=disable python manage.py test chatbot
+DATABASE_URL=postgresql://postgres:YOUR_LOCAL_PASSWORD@localhost:5432/postgres DB_SSLMODE=disable python manage.py test
 ```
 
 The configuration and model-definition tests do not need a database:

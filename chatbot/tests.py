@@ -1,11 +1,13 @@
 import os
 from unittest import mock
 
+from django.contrib.auth import get_user_model
 from django.contrib.postgres.search import SearchQuery
 from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError, connection, models, transaction
 from django.db.models import ProtectedError
 from django.test import SimpleTestCase, TestCase
+from django.urls import reverse
 
 from config.settings import database_from_env
 
@@ -89,6 +91,46 @@ class ModelDefinitionTests(SimpleTestCase):
         self.assertEqual(len(unique), 1)
         # The leading column lets this index serve foreign-key lookups.
         self.assertEqual(unique[0].fields, ('document', 'chunk_index'))
+
+
+class WorkspaceViewTests(TestCase):
+    def setUp(self):
+        self.url = reverse('chatbot:workspace')
+        self.user = get_user_model().objects.create_user('advisor', 'advisor@example.com', 'correct-Horse-battery-42')
+
+    def test_anonymous_user_is_redirected_to_login(self):
+        self.assertRedirects(self.client.get(self.url), f"{reverse('login')}?next={self.url}")
+
+    def test_signed_in_user_sees_unconnected_workspace(self):
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'chatbot/workspace.html')
+        self.assertContains(response, 'The assistant isn’t connected yet.')
+        self.assertContains(response, 'New chat')
+        self.assertContains(response, 'Section 1031')
+        self.assertContains(response, 'Delaware Statutory Trust')
+        self.assertContains(response, 'Section 721')
+        self.assertContains(response, 'id="composer-input"')
+        self.assertRegex(response.content.decode(), r'<button[^>]*sb-composer__send[^>]*disabled')
+
+    def test_user_menu_has_post_logout_and_hides_admin_link_for_regular_users(self):
+        self.client.force_login(self.user)
+        response = self.client.get(self.url)
+        self.assertContains(response, f'<form method="post" action="{reverse("logout")}">')
+        self.assertContains(response, 'Signed in as advisor')
+        self.assertNotContains(response, reverse('admin:index'))
+
+    def test_staff_users_see_admin_link(self):
+        self.user.is_staff = True
+        self.user.save()
+        self.client.force_login(self.user)
+        self.assertContains(self.client.get(self.url), reverse('admin:index'))
+
+    def test_workspace_does_not_accept_posts(self):
+        # The composer is not wired to a backend; no answers are generated.
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.post(self.url, {'message': 'Hi'}).status_code, 405)
 
 
 class DocumentSchemaTests(TestCase):

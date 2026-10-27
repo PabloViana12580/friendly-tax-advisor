@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Sign in | Sightbridge{% endblock %}
+{% block body_class %}sb-login-page{% endblock %}
+
+{% block body %}
+<div class="sb-login">
+  <main class="sb-login__form-pane" id="main">
+    <div class="sb-login__form-wrap">
+      {% url 'login' as login_url %}
+      {% include "components/brand.html" with href=login_url %}
+
+      <h1 class="sb-login__title">Sign in</h1>
+      <p class="sb-login__lede">Use the account your firm administrator created for you.</p>
+
+      {% if form.non_field_errors %}
+        <div class="sb-alert" role="alert">
+          {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+        </div>
+      {% endif %}
+
+      <form method="post" action="{% url 'login' %}" class="sb-login__form" novalidate>
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ next }}">
+
+        <div class="sb-field">
+          <label class="sb-label" for="{{ form.username.id_for_label }}">{{ form.username.label }}</label>
+          <input type="text" name="{{ form.username.html_name }}" id="{{ form.username.id_for_label }}"
+                 class="sb-input{% if form.username.errors %} is-invalid{% endif %}"
+                 value="{{ form.username.value|default_if_none:'' }}"
+                 autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus
+                 maxlength="{{ form.username.field.max_length }}"
+                 {% if form.username.errors %}aria-invalid="true" aria-describedby="{{ form.username.id_for_label }}-error"{% endif %}>
+          {% if form.username.errors %}
+            <p class="sb-field__error" id="{{ form.username.id_for_label }}-error">{{ form.username.errors|first }}</p>
+          {% endif %}
+        </div>
+
+        {% include "components/password_field.html" with field=form.password %}
+
+        <button type="submit" class="sb-btn sb-btn--primary sb-btn--block">Sign in</button>
+      </form>
+
+      <p class="sb-login__help">Need an account or a password reset? Ask your firm administrator. Accounts aren’t created here.</p>
+    </div>
+
+    <p class="sb-disclaimer">For general educational purposes only; this is not tax, legal, or investment advice.</p>
+  </main>
+
+  <aside class="sb-login__sources" aria-labelledby="sources-title">
+    <h2 class="sb-login__sources-title" id="sources-title">Every answer will cite one of these public sources.</h2>
+    <p class="sb-login__sources-lede">Sightbridge answers educational questions about 1031 exchanges, Delaware Statutory Trusts, and 721 contributions from this approved reference set, and says so when the sources don’t cover a question.</p>
+    <ol class="sb-sources">
+      <li><cite>Publication 544, Sales and Other Dispositions of Assets</cite><span>IRS</span></li>
+      <li><cite>Instructions for Form 8824, Like-Kind Exchanges</cite><span>IRS</span></li>
+      <li><cite>26 U.S.C. § 1031</cite><span>U.S. Code</span></li>
+      <li><cite>26 C.F.R. § 1.1031(k)-1, deferred exchanges</cite><span>eCFR</span></li>
+      <li><cite>Revenue Ruling 2004-86</cite><span>IRS</span></li>
+      <li><cite>26 U.S.C. § 721</cite><span>U.S. Code</span></li>
+      <li><cite>26 C.F.R. § 1.721-1</cite><span>eCFR</span></li>
+      <li><cite>Investor Bulletin: Real Estate Investment Trusts</cite><span>SEC</span></li>
+      <li><cite>ExchangeRight Income Fund 2025 Form 10-K</cite><span>SEC EDGAR</span></li>
+      <li><cite>Publication 551, Basis of Assets</cite><span>IRS</span></li>
+    </ol>
+  </aside>
+</div>
+{% endblock %}
