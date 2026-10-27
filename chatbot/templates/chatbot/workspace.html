@@ -29,7 +29,17 @@
 
     <section class="sb-history" aria-labelledby="history-title">
       <h2 class="sb-history__title" id="history-title">Conversations</h2>
-      <p class="sb-history__empty">Past conversations will be listed here once the assistant is connected.</p>
+      <ul class="sb-history__list" id="history-list"{% if not conversations %} hidden{% endif %}>
+        {% for item in conversations %}
+          <li>
+            <a class="sb-history__link" href="{% url 'chatbot:conversation' item.pk %}" data-conversation="{{ item.pk }}"
+               {% if conversation and item.pk == conversation.pk %}aria-current="page"{% endif %}>{{ item.title }}</a>
+          </li>
+        {% endfor %}
+      </ul>
+      {% if not conversations %}
+        <p class="sb-history__empty" id="history-empty">Your conversations will be listed here.</p>
+      {% endif %}
     </section>
 
     <div class="sb-sidebar__foot">
@@ -40,13 +50,16 @@
 
   <main class="sb-main" id="main">
     <div class="sb-conversation">
-      <div class="sb-welcome">
+      <div class="sb-thread" id="thread" aria-live="polite">
+        {% for exchange in exchanges %}
+          {% include "chatbot/_exchange.html" %}
+        {% endfor %}
+      </div>
+
+      <div class="sb-welcome" id="welcome"{% if exchanges %} hidden{% endif %}>
         <h1 class="sb-welcome__title">What would you like to understand about 1031 exchanges, DSTs, or 721 contributions?</h1>
 
-        <div class="sb-status" role="status" id="assistant-status">
-          <span class="sb-status__dot" aria-hidden="true"></span>
-          <p><strong>The assistant isn’t connected yet.</strong> You can draft a question, but it can’t be sent until source retrieval is in place. No answers are generated in the meantime.</p>
-        </div>
+        <p class="sb-welcome__lede">Answers come only from the approved public sources, with each source cited. If the sources don’t cover a question, the assistant says so.</p>
 
         <h2 class="sb-suggestions__title" id="suggestions-title">Start from a common question</h2>
         <ul class="sb-suggestions" aria-labelledby="suggestions-title">
@@ -63,15 +76,17 @@
     </div>
 
     <div class="sb-composer-wrap">
-      <div class="sb-composer">
+      <form class="sb-composer" id="composer" method="post" action="{% url 'chatbot:ask' %}"
+            data-conversation-id="{{ conversation.pk|default:'' }}"
+            data-conversation-url="{% url 'chatbot:workspace' %}c/">
+        {% csrf_token %}
         <label class="visually-hidden" for="composer-input">Your question</label>
-        <textarea id="composer-input" class="sb-composer__input" rows="1" maxlength="2000"
-                  placeholder="Ask a general question"
-                  aria-describedby="assistant-status" data-autogrow></textarea>
-        <button type="button" class="sb-btn sb-btn--primary sb-composer__send" disabled
-                aria-describedby="assistant-status">Send</button>
-      </div>
-      <p class="sb-disclaimer">For general educational purposes only; this is not tax, legal, or investment advice.</p>
+        <textarea id="composer-input" name="question" class="sb-composer__input" rows="1" maxlength="2000"
+                  placeholder="Ask a general question" aria-describedby="composer-note" required data-autogrow></textarea>
+        <button type="submit" class="sb-btn sb-btn--primary sb-composer__send">Send</button>
+      </form>
+      <p class="sb-composer__error" id="composer-error" role="alert" hidden></p>
+      <p class="sb-disclaimer" id="composer-note">Don’t include client names or personal details. Questions are processed by Google’s Gemini API, which may use them to improve its products. Answers are general educational information only.</p>
     </div>
   </main>
 </div>

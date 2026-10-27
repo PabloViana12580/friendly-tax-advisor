@@ -1,0 +1,25 @@
+{% load chatbot_tags %}
+{# One question and its answer. Used for saved history and for new answers returned by chat/ask. #}
+<article class="sb-exchange sb-exchange--{{ exchange.outcome }}" id="exchange-{{ exchange.pk }}">
+  <p class="sb-exchange__question">{{ exchange.question }}</p>
+  <div class="sb-exchange__answer">
+    {% render_answer exchange %}
+  </div>
+  {% with citations=exchange.citations.all %}
+    {% if citations %}
+      <h3 class="sb-citations__title">Sources</h3>
+      <ol class="sb-citations">
+        {% for citation in citations %}
+          <li id="source-{{ exchange.pk }}-{{ citation.number }}" value="{{ citation.number }}">
+            <a href="{{ citation.source_url }}" target="_blank" rel="noopener noreferrer">{{ citation.document_title }}</a>{% if citation.section_heading or citation.page_number %}<span class="sb-citations__where">{{ citation.section_heading }}{% if citation.section_heading and citation.page_number %}, {% endif %}{% if citation.page_number %}page {{ citation.page_number }}{% endif %}</span>{% endif %}
+            <details class="sb-citations__passage">
+              <summary>Show cited passage</summary>
+              <blockquote>{{ citation.cited_text|linebreaksbr }}</blockquote>
+            </details>
+          </li>
+        {% endfor %}
+      </ol>
+    {% endif %}
+  {% endwith %}
+  <p class="sb-exchange__disclaimer">{{ exchange.disclaimer }}</p>
+</article>
