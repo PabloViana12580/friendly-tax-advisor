@@ -2,7 +2,7 @@
 
 An advisor-facing Q&A assistant for educational questions about Section 1031 exchanges, Delaware Statutory Trusts (DSTs), and Section 721 contributions to a REIT operating partnership (often described as a “721 exchange”).
 
-> **Status:** This repository currently has no application code. The linked sources below are the planned public reference set; they have not been downloaded, indexed, or used by an assistant.
+> **Status:** This repository contains a Django project connected to Supabase PostgreSQL and the (empty) document schema for the assistant. There is no chatbot, ingestion, or retrieval code yet. The linked sources below are the planned public reference set; they have not been downloaded, indexed, or used by an assistant.
 
 ## Part 1: Advisor Q&A assistant
 
@@ -35,6 +35,78 @@ Revenue Ruling 2004-86 applies to the facts it describes, and the SEC filing ill
 
 ## Current state and next steps
 
-The app, login, source ingestion and retrieval, passage-level citations, advice-request handling, answer disclaimer, admin log, and deployment are not implemented in this repository. There is no runnable application yet.
+The database schema for approved documents and their passages exists (see [Development setup](#development-setup)). The chat app, login, source ingestion and retrieval, passage-level citations, advice-request handling, answer disclaimer, admin log, and deployment are not implemented yet.
 
 Next, build the small chat application, ingest and keep the approved sources current, return citations to the specific supporting passages, and implement the guardrails and admin-only log described above. Then evaluate answers for supported questions, questions outside the source set, and personalized advice requests before deploying it.
+
+## Development setup
+
+Requirements: Python 3.13, a Supabase project used for **development**, and optionally a local PostgreSQL server for running database tests. Contributor and agent rules are in [AGENTS.md](AGENTS.md).
+
+### Install
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate          # Windows; use `source .venv/bin/activate` on macOS/Linux
+pip install -r requirements.txt
+```
+
+### Configure environment variables
+
+```bash
+cp .env.example .env
+```
+
+Settings load `.env` from the repository root; variables already set in the shell take precedence. `.env` is git-ignored. Never commit it.
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | Yes, unless `DB_*` is used | Supabase PostgreSQL connection string |
+| `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_PORT`, `DB_NAME` | Alternative to `DATABASE_URL` | Individual connection settings (port defaults to `5432`, name to `postgres`) |
+| `DB_SSLMODE` | No | `require` (default), `verify-ca` or `verify-full`. Weaker modes are allowed only for `localhost` |
+| `DB_SSLROOTCERT` | For `verify-*` | Path to Supabase's CA certificate |
+| `DB_CONN_MAX_AGE` | No | Persistent-connection lifetime in seconds (default `60`) |
+| `DJANGO_SECRET_KEY` | Yes outside local development | Django secret key |
+
+Use the **Session pooler** connection string from Supabase Dashboard → **Connect**. It works on IPv4 networks, while the direct connection (`db.<ref>.supabase.co`) is IPv6-only unless the IPv4 add-on is enabled. The transaction pooler (port `6543`) is not supported by this configuration, because it does not support prepared statements or server-side cursors.
+
+Use the database password from the Supabase dashboard. Do not use the `service_role` key or any other Supabase API key; those keys are not database credentials and must never reach frontend code.
+
+If no database is configured, Django raises `ImproperlyConfigured`. There is intentionally no SQLite fallback.
+
+### Verify the connection and apply migrations
+
+Confirm that `DATABASE_URL` points to the development project, never production, before running `migrate`.
+
+```bash
+python manage.py check --database default   # connects and runs database checks
+python manage.py showmigrations              # lists applied/unapplied migrations
+python manage.py migrate                     # applies Django and chatbot migrations
+```
+
+### Schema
+
+The `chatbot` app owns the two document models in `chatbot/models.py`. Django migrations are the source of truth for this schema.
+
+- **`Document`** is an approved public source: `title`, `publisher`, unique `source_url`, `status` (`draft` / `approved` / `archived`, also enforced by a check constraint), `content_hash`, `retrieved_at`, and timestamps.
+- **`DocumentPassage`** is an extracted passage: `document` (FK), `chunk_index`, `content`, `page_number`, `section_heading`, `created_at`. `(document, chunk_index)` is unique, and the unique index also serves FK lookups. A document that still has passages cannot be deleted (`PROTECT`). Retire sources by archiving them so that citations keep resolving.
+- Full-text search uses a GIN index on `to_tsvector('english', content)`. Queries must use `chatbot.models.passage_search_vector()` for PostgreSQL to use the index.
+- Migrations `0002` and `0003` enable row level security, with no policies, on both chatbot tables and on Django's built-in tables (`auth_*`, `django_*`). This blocks Supabase's Data API (`anon` / `authenticated` roles), while Django, which connects as the table owner, is unaffected. Any new table in `public` also needs RLS enabled; the test suite fails if one does not have it.
+
+### Tests
+
+```bash
+python manage.py test chatbot
+```
+
+Database tests run in a temporary `test_postgres` database on the configured server. The real database is not touched, and the temporary one is dropped afterwards. This works with the Supabase session pooler: `config/test_runner.py` drops the test database with `WITH (FORCE)`, because the pooler keeps a connection to it open. A local PostgreSQL server also works:
+
+```bash
+DATABASE_URL=postgresql://postgres:YOUR_LOCAL_PASSWORD@localhost:5432/postgres DB_SSLMODE=disable python manage.py test chatbot
+```
+
+The configuration and model-definition tests do not need a database:
+
+```bash
+python manage.py test chatbot.tests.DatabaseConfigTests chatbot.tests.ModelDefinitionTests
+```

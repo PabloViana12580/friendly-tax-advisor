@@ -10,17 +10,26 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlsplit
+
+from django.core.exceptions import ImproperlyConfigured
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load local development variables from BASE_DIR/.env if it exists.
+# Variables already set in the environment take precedence.
+load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-$8($ppnqdvw+*_nr*h882s=nd*wtz(g85!0*-r!3n=)q7x6kp@'
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY') or 'django-insecure-$8($ppnqdvw+*_nr*h882s=nd*wtz(g85!0*-r!3n=)q7x6kp@'
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -37,6 +46,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'chatbot',
 ]
 
 MIDDLEWARE = [
@@ -72,12 +82,75 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+# Supabase-hosted PostgreSQL. Configure either DATABASE_URL (preferred) or
+# the individual DB_* variables. There is deliberately no SQLite fallback.
+
+SECURE_SSLMODES = {'require', 'verify-ca', 'verify-full'}
+LOCAL_HOSTS = {'localhost', '127.0.0.1', '::1'}
+
+
+def database_from_env():
+    url = os.environ.get('DATABASE_URL')
+    if url:
+        parts = urlsplit(url)
+        if parts.scheme not in ('postgres', 'postgresql'):
+            raise ImproperlyConfigured('DATABASE_URL must be a postgresql:// URL.')
+        query = parse_qs(parts.query)
+        config = {
+            'NAME': unquote(parts.path.lstrip('/')) or 'postgres',
+            'USER': unquote(parts.username or ''),
+            'PASSWORD': unquote(parts.password or ''),
+            'HOST': parts.hostname or '',
+            'PORT': str(parts.port or 5432),
+        }
+        url_sslmode = query.get('sslmode', [None])[0]
+    else:
+        missing = [
+            name for name in ('DB_HOST', 'DB_USER', 'DB_PASSWORD')
+            if not os.environ.get(name)
+        ]
+        if missing:
+            raise ImproperlyConfigured(
+                'Database is not configured. Set DATABASE_URL or '
+                + ', '.join(missing) + ' (see .env.example).'
+            )
+        config = {
+            'NAME': os.environ.get('DB_NAME', 'postgres'),
+            'USER': os.environ['DB_USER'],
+            'PASSWORD': os.environ['DB_PASSWORD'],
+            'HOST': os.environ['DB_HOST'],
+            'PORT': os.environ.get('DB_PORT', '5432'),
+        }
+        url_sslmode = None
+
+    if not (config['HOST'] and config['USER'] and config['PASSWORD']):
+        raise ImproperlyConfigured('DATABASE_URL must include user, password, and host.')
+
+    # Supabase requires encrypted connections; refuse weaker modes except for
+    # a local PostgreSQL server (e.g. for running the test suite).
+    sslmode = os.environ.get('DB_SSLMODE') or url_sslmode or 'require'
+    if sslmode not in SECURE_SSLMODES and config['HOST'] not in LOCAL_HOSTS:
+        raise ImproperlyConfigured(
+            f'DB_SSLMODE must be one of {sorted(SECURE_SSLMODES)}, got {sslmode!r}.'
+        )
+    options = {'sslmode': sslmode}
+    if os.environ.get('DB_SSLROOTCERT'):
+        options['sslrootcert'] = os.environ['DB_SSLROOTCERT']
+
+    return {
+        'ENGINE': 'django.db.backends.postgresql',
+        **config,
+        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', '60')),
+        'CONN_HEALTH_CHECKS': True,
+        'OPTIONS': options,
     }
+
+
+DATABASES = {
+    'default': database_from_env(),
 }
+
+TEST_RUNNER = 'config.test_runner.PoolerSafeTestRunner'
 
 
 # Password validation
