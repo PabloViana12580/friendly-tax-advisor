@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Workspace | Sightbridge{% endblock %}
+{% block body_class %}sb-app-page{% endblock %}
+
+{% block body %}
+{% url 'chatbot:workspace' as workspace_url %}
+<div class="sb-app">
+  <header class="sb-topbar d-lg-none">
+    <button class="sb-icon-btn" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebar"
+            aria-controls="sidebar" aria-label="Open navigation">
+      <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.6"/></svg>
+    </button>
+    {% include "components/brand.html" with href=workspace_url %}
+  </header>
+
+  <div class="sb-sidebar-col">
+  <nav class="sb-sidebar offcanvas-lg offcanvas-start" id="sidebar" tabindex="-1" aria-label="Workspace">
+    <div class="sb-sidebar__head">
+      {% include "components/brand.html" with href=workspace_url %}
+      <button type="button" class="btn-close btn-close-white d-lg-none" data-bs-dismiss="offcanvas"
+              data-bs-target="#sidebar" aria-label="Close navigation"></button>
+    </div>
+
+    <a class="sb-btn sb-btn--linen sb-btn--block" href="{{ workspace_url }}">
+      <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.6"/></svg>
+      New chat
+    </a>
+
+    <section class="sb-history" aria-labelledby="history-title">
+      <h2 class="sb-history__title" id="history-title">Conversations</h2>
+      <p class="sb-history__empty">Past conversations will be listed here once the assistant is connected.</p>
+    </section>
+
+    <div class="sb-sidebar__foot">
+      {% include "components/user_menu.html" %}
+    </div>
+  </nav>
+  </div>
+
+  <main class="sb-main" id="main">
+    <div class="sb-conversation">
+      <div class="sb-welcome">
+        <h1 class="sb-welcome__title">What would you like to understand about 1031 exchanges, DSTs, or 721 contributions?</h1>
+
+        <div class="sb-status" role="status" id="assistant-status">
+          <span class="sb-status__dot" aria-hidden="true"></span>
+          <p><strong>The assistant isn’t connected yet.</strong> You can draft a question, but it can’t be sent until source retrieval is in place. No answers are generated in the meantime.</p>
+        </div>
+
+        <h2 class="sb-suggestions__title" id="suggestions-title">Start from a common question</h2>
+        <ul class="sb-suggestions" aria-labelledby="suggestions-title">
+          {% for question in suggested_questions %}
+            <li>
+              <button type="button" class="sb-suggestion" data-suggestion="{{ question.text }}">
+                <span class="sb-suggestion__topic">{{ question.topic }}</span>
+                <span class="sb-suggestion__text">{{ question.text }}</span>
+              </button>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+
+    <div class="sb-composer-wrap">
+      <div class="sb-composer">
+        <label class="visually-hidden" for="composer-input">Your question</label>
+        <textarea id="composer-input" class="sb-composer__input" rows="1" maxlength="2000"
+                  placeholder="Ask a general question"
+                  aria-describedby="assistant-status" data-autogrow></textarea>
+        <button type="button" class="sb-btn sb-btn--primary sb-composer__send" disabled
+                aria-describedby="assistant-status">Send</button>
+      </div>
+      <p class="sb-disclaimer">For general educational purposes only; this is not tax, legal, or investment advice.</p>
+    </div>
+  </main>
+</div>
+{% endblock %}

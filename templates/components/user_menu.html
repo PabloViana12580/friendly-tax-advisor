@@ -1,0 +1,20 @@
+{# Signed-in user menu with POST logout. Expects `user` in context. #}
+<div class="dropup sb-user-menu">
+  <button class="sb-user-menu__toggle dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+    <span class="sb-user-menu__avatar" aria-hidden="true">{{ user.get_username|first|upper }}</span>
+    <span class="sb-user-menu__name">{{ user.get_full_name|default:user.get_username }}</span>
+  </button>
+  <ul class="dropdown-menu sb-dropdown">
+    <li><span class="dropdown-item-text sb-dropdown__meta">Signed in as {{ user.get_username }}</span></li>
+    {% if user.is_staff %}
+      <li><a class="dropdown-item" href="{% url 'admin:index' %}">Administration</a></li>
+    {% endif %}
+    <li><hr class="dropdown-divider"></li>
+    <li>
+      <form method="post" action="{% url 'logout' %}">
+        {% csrf_token %}
+        <button type="submit" class="dropdown-item">Sign out</button>
+      </form>
+    </li>
+  </ul>
+</div>
