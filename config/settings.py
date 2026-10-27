@@ -64,7 +64,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -153,6 +153,20 @@ DATABASES = {
 TEST_RUNNER = 'config.test_runner.PoolerSafeTestRunner'
 
 
+# Authentication and sessions (Django's built-in auth; no public registration)
+
+LOGIN_URL = 'login'
+LOGIN_REDIRECT_URL = 'chatbot:workspace'
+LOGOUT_REDIRECT_URL = 'login'
+
+SESSION_COOKIE_AGE = 8 * 60 * 60  # one working day
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+# Send cookies over HTTPS only once DEBUG is off.
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+
+
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
@@ -188,6 +202,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATICFILES_DIRS = [BASE_DIR / 'static']
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
