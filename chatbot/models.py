@@ -1,5 +1,6 @@
 import uuid
 
+from django.conf import settings
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVector
 from django.db import models
@@ -90,3 +91,94 @@ class DocumentPassage(models.Model):
 
     def __str__(self):
         return f'{self.document} (passage {self.chunk_index})'
+
+
+class Conversation(models.Model):
+    """A user's chat thread; groups exchanges for follow-up questions."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='conversations', db_index=False,
+    )
+    title = models.CharField(max_length=120)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+        indexes = [
+            models.Index(fields=['user', '-updated_at'], name='chatbot_conv_user_updated_idx'),
+        ]
+
+    def __str__(self):
+        return self.title
+
+
+class ChatExchange(models.Model):
+    """Audit log entry: one question and the answer shown for it."""
+
+    class Category(models.TextChoices):
+        EDUCATIONAL = 'educational', 'Educational'
+        PERSONALIZED_ADVICE = 'personalized_advice', 'Personalized advice'
+        OUT_OF_SCOPE = 'out_of_scope', 'Out of scope'
+
+    class Outcome(models.TextChoices):
+        ANSWERED = 'answered', 'Answered'
+        NOT_FOUND = 'not_found', 'Not in sources'
+        DECLINED_ADVICE = 'declined_advice', 'Declined advice'
+        OUT_OF_SCOPE = 'out_of_scope', 'Out of scope'
+        ERROR = 'error', 'Error'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # PROTECT: deleting a conversation or user must not silently erase the audit log.
+    # db_index=False: the composite indexes below lead with these columns.
+    conversation = models.ForeignKey(
+        Conversation, on_delete=models.PROTECT, related_name='exchanges', db_index=False,
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='chat_exchanges', db_index=False,
+    )
+    question = models.TextField()
+    standalone_query = models.TextField(blank=True, help_text='Self-contained query used for retrieval.')
+    category = models.CharField(max_length=32, choices=Category.choices)
+    outcome = models.CharField(max_length=32, choices=Outcome.choices)
+    answer = models.TextField(help_text='Answer shown to the user, with [n] citation markers.')
+    disclaimer = models.TextField()
+    retrieved_passage_ids = models.JSONField(default=list, blank=True)
+    model = models.CharField(max_length=100, blank=True)
+    latency_ms = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['user', 'created_at'], name='chatbot_exch_user_created_idx'),
+            models.Index(fields=['outcome'], name='chatbot_exch_outcome_idx'),
+            models.Index(fields=['conversation', 'created_at'], name='chatbot_exch_conv_created_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.created_at:%Y-%m-%d %H:%M} {self.user}: {self.question[:60]}'
+
+
+class ExchangeCitation(models.Model):
+    """A passage cited in an answer, snapshotted so the log survives re-ingestion."""
+
+    # db_index=False: the (exchange, number) unique index serves lookups.
+    exchange = models.ForeignKey(ChatExchange, on_delete=models.CASCADE, related_name='citations', db_index=False)
+    passage = models.ForeignKey(DocumentPassage, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    number = models.PositiveSmallIntegerField(help_text='Citation number shown in the answer.')
+    document_title = models.CharField(max_length=500)
+    source_url = models.URLField(max_length=2048)
+    section_heading = models.CharField(max_length=500, blank=True)
+    page_number = models.PositiveIntegerField(null=True, blank=True)
+    cited_text = models.TextField()
+
+    class Meta:
+        ordering = ['exchange', 'number']
+        constraints = [
+            models.UniqueConstraint(fields=['exchange', 'number'], name='chatbot_citation_exchange_number_unique'),
+        ]
+
+    def __str__(self):
+        return f'[{self.number}] {self.document_title}'

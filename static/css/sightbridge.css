@@ -473,6 +473,122 @@ body {
   line-height: 1.35;
 }
 
+.sb-welcome__lede {
+  max-width: 38rem;
+  margin-bottom: var(--sb-space-6);
+  color: var(--sb-stone);
+}
+
+/* Sidebar conversation list */
+.sb-history__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sb-history__link {
+  display: block;
+  overflow: hidden;
+  padding: var(--sb-space-2) var(--sb-space-3);
+  border-radius: var(--sb-radius-sm);
+  color: var(--sb-linen);
+  font-size: var(--sb-text-sm);
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sb-history__link:hover { background: var(--sb-graphite); color: var(--sb-white); }
+.sb-history__link[aria-current="page"] { background: var(--sb-graphite); color: var(--sb-white); font-weight: 600; }
+
+/* Thread of questions and answers */
+.sb-thread {
+  max-width: 44rem;
+  margin: 0 auto;
+}
+.sb-exchange {
+  padding-bottom: var(--sb-space-6);
+  margin-bottom: var(--sb-space-6);
+  border-bottom: 1px solid var(--sb-linen-deep);
+  scroll-margin-top: var(--sb-space-6);
+}
+.sb-exchange__question {
+  margin-bottom: var(--sb-space-4);
+  font-family: var(--sb-font-display);
+  font-size: var(--sb-text-xl);
+  line-height: 1.3;
+}
+.sb-exchange__answer p {
+  max-width: 40rem;
+  margin-bottom: var(--sb-space-3);
+  line-height: 1.6;
+}
+.sb-exchange__pending {
+  color: var(--sb-stone);
+  font-style: italic;
+}
+.sb-cite { line-height: 0; }
+.sb-cite a {
+  padding: 0 0.15em;
+  color: var(--sb-ink);
+  font-size: var(--sb-text-xs);
+  font-weight: 600;
+  text-decoration: none;
+}
+.sb-cite a:hover { text-decoration: underline; }
+
+/* Answers that aren't a cited answer read as notices. */
+.sb-exchange--not_found .sb-exchange__answer,
+.sb-exchange--out_of_scope .sb-exchange__answer,
+.sb-exchange--error .sb-exchange__answer,
+.sb-exchange--declined_advice .sb-exchange__answer > p:first-child {
+  padding-left: var(--sb-space-4);
+  border-left: 3px solid var(--sb-stone);
+  color: var(--sb-graphite);
+}
+.sb-exchange--error .sb-exchange__answer { border-left-color: var(--sb-danger); }
+
+.sb-citations__title {
+  margin: var(--sb-space-5) 0 var(--sb-space-2);
+  color: var(--sb-stone);
+  font-size: var(--sb-text-sm);
+  font-weight: 600;
+}
+.sb-citations {
+  margin: 0;
+  padding-left: var(--sb-space-5);
+  font-size: var(--sb-text-sm);
+}
+.sb-citations li { margin-bottom: var(--sb-space-2); }
+.sb-citations li:target { background: var(--sb-white); }
+.sb-citations a { color: var(--sb-ink); font-weight: 600; text-underline-offset: 3px; }
+.sb-citations__where { color: var(--sb-stone); }
+.sb-citations__where::before { content: ", "; }
+.sb-citations__passage summary {
+  width: fit-content;
+  color: var(--sb-stone);
+  cursor: pointer;
+}
+.sb-citations__passage blockquote {
+  margin: var(--sb-space-2) 0;
+  padding: var(--sb-space-3) var(--sb-space-4);
+  border-left: 2px solid var(--sb-linen-deep);
+  background: var(--sb-white);
+  font-family: var(--sb-font-display);
+  font-size: var(--sb-text-md);
+  line-height: 1.5;
+}
+.sb-exchange__disclaimer {
+  margin: var(--sb-space-4) 0 0;
+  color: var(--sb-stone);
+  font-size: var(--sb-text-xs);
+}
+
+.sb-composer__error {
+  max-width: 44rem;
+  margin: 0 auto var(--sb-space-2);
+  color: var(--sb-danger);
+  font-size: var(--sb-text-sm);
+}
+
 .sb-composer-wrap {
   position: sticky;
   bottom: 0;

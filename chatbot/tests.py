@@ -101,18 +101,19 @@ class WorkspaceViewTests(TestCase):
     def test_anonymous_user_is_redirected_to_login(self):
         self.assertRedirects(self.client.get(self.url), f"{reverse('login')}?next={self.url}")
 
-    def test_signed_in_user_sees_unconnected_workspace(self):
+    def test_signed_in_user_sees_empty_workspace(self):
         self.client.force_login(self.user)
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'chatbot/workspace.html')
-        self.assertContains(response, 'The assistant isn’t connected yet.')
         self.assertContains(response, 'New chat')
         self.assertContains(response, 'Section 1031')
         self.assertContains(response, 'Delaware Statutory Trust')
         self.assertContains(response, 'Section 721')
-        self.assertContains(response, 'id="composer-input"')
-        self.assertRegex(response.content.decode(), r'<button[^>]*sb-composer__send[^>]*disabled')
+        self.assertContains(response, 'Your conversations will be listed here.')
+        self.assertContains(response, f'action="{reverse("chatbot:ask")}"')
+        self.assertContains(response, 'csrfmiddlewaretoken')
+        self.assertContains(response, 'Don’t include client names or personal details.')
 
     def test_user_menu_has_post_logout_and_hides_admin_link_for_regular_users(self):
         self.client.force_login(self.user)
@@ -128,7 +129,7 @@ class WorkspaceViewTests(TestCase):
         self.assertContains(self.client.get(self.url), reverse('admin:index'))
 
     def test_workspace_does_not_accept_posts(self):
-        # The composer is not wired to a backend; no answers are generated.
+        # Questions go to chatbot:ask; the page itself is read-only.
         self.client.force_login(self.user)
         self.assertEqual(self.client.post(self.url, {'message': 'Hi'}).status_code, 405)
 

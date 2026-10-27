@@ -34,6 +34,9 @@ Rules for anyone (human or AI agent) changing this repository.
 - If the retrieved passages do not support an answer, say so; never fabricate.
 - Never give personalized tax, legal, or investment recommendations.
 - Never show fabricated or simulated answers in the UI.
+- The LLM (Gemini API) is called only from `chatbot/llm.py`, server-side, and receives only retrieved passages; it never gets database access. Keep the API key server-side.
+- Enforce guardrails in code, not only in prompts: citations are validated against the passages sent (`chatbot/safety.py`), the disclaimer is appended by code, and every exchange is logged (`chatbot/audit.py`), including errors.
+- Tests never call the real LLM; use a fake client.
 - Keep ingestion, retrieval, answer generation, safety controls, and audit logging in separate modules with single responsibilities.
 
 ## Working practices
