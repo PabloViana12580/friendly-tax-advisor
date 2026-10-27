@@ -2,7 +2,7 @@
 
 An advisor-facing Q&A assistant for educational questions about Section 1031 exchanges, Delaware Statutory Trusts (DSTs), and Section 721 contributions to a REIT operating partnership (often described as a “721 exchange”).
 
-> **Status:** Sign-in, the grounded chat pipeline (retrieval, Gemini answers with validated citations, advice handling, disclaimer), and the admin-only exchange log are implemented. The linked sources below have **not been loaded yet**: until approved documents are in the database, every question gets the "not in the approved sources" response.
+> **Status:** Sign-in, the grounded chat pipeline (retrieval, Gemini answers with validated citations, advice handling, disclaimer), and the admin-only exchange log are implemented. Until approved documents are loaded, every in-scope question gets the "not in the approved sources" response. See [Loading documents](#loading-documents) and [Production readiness test](#production-readiness-test).
 
 ## Part 1: Advisor Q&A assistant
 
@@ -49,8 +49,9 @@ POST /chat/ask/
  3. Retrieve     PostgreSQL full-text search (GIN index) over passages of
                  approved documents only; top 8 above a relevance threshold.
                  No matches: "not in the approved sources", no answer call.
- 4. Answer       Gemini (flash) gets only the labelled passages P1..P8 and
+ 4. Answer       Gemini (3.6 flash) gets only the labelled passages P1..P8 and
                  returns JSON: status, answer with [P#] markers, cited labels.
+                 If it is overloaded or times out, flash-lite is tried once.
  5. Validate     Markers that don't match a passage that was sent are removed.
                  An answer with no valid citation becomes "not found".
  6. Disclaimer   Added by code to every response, whatever the outcome.
@@ -62,7 +63,7 @@ Each step lives in its own module in `chatbot/`: `llm.py` (Gemini client and pro
 
 **Personalized advice.** The triage model flags questions that ask what a specific person or client should do, whether a specific transaction qualifies, what someone's own tax result would be, or for a product or investment recommendation. The answer always starts with a fixed decline and a referral to a qualified professional. It then answers the general version of the question from the sources, with citations, when the sources cover it. If Gemini can't classify a question, a keyword rule ("should I", "my client", "do you recommend", ...) catches the common phrasings.
 
-**Free-tier limits.** Each question uses at most two Gemini calls, and fewer when it is out of scope or retrieval finds nothing. Each user can ask 10 questions a minute (`CHAT_RATE_LIMIT_PER_MINUTE`). When Gemini is rate-limited or unreachable, the user is asked to try again, and the exchange is still logged with outcome `error`.
+**Free-tier limits.** Each question normally uses at most two Gemini calls, and fewer when it is out of scope or retrieval finds nothing. The free tier is often overloaded: in testing, `gemini-3.8-flash` returned 503 and 504 errors and took over 100 seconds, so answers use `gemini-3.6-flash` (about 3 to 5 seconds). When the answer model returns 429, 500, 503, or 504, or times out (20 seconds), one retry goes to `gemini-3.5-flash-lite`; other errors, such as a bad key, are not retried. The exchange log records which model answered. Each user can ask 10 questions a minute (`CHAT_RATE_LIMIT_PER_MINUTE`). When Gemini is rate-limited or unreachable, the user is asked to try again, and the exchange is still logged with outcome `error`.
 
 **Privacy.** Gemini's free tier may use prompts to improve Google's products, so the UI asks users not to include client names or personal details.
 
@@ -72,9 +73,9 @@ Every exchange is visible to staff at `/admin/` under **Chat exchanges**. Each e
 
 ### What's left out, and what I'd build next
 
-- **Documents aren't loaded yet.** The reference set above still needs to be downloaded, split into passages, and approved (see [Loading documents](#loading-documents)).
+- **No ingestion pipeline.** Documents are loaded by hand (see [Loading documents](#loading-documents)). Next: a script that downloads each source, splits it into passages, and records `content_hash` so changed sources can be re-ingested.
 - **Lexical retrieval only.** Full-text search misses paraphrases ("swap" vs. "like-kind exchange"); the triage rewrite helps. Next: measure misses with an evaluation set and add pgvector embeddings for hybrid search if needed.
-- **No automated answer evaluation.** Next: a fixed set of supported, unsupported, and advice questions run on every change.
+- **The evaluation is manual.** `run_eval` checks the outcome of a fixed question set, but not the wording or accuracy of answers, and it isn't run in CI. Next: grade answers against expected facts and run it on every change.
 - **No streaming.** Answers appear when complete, usually in a few seconds.
 - **No login rate limiting or account lockout.**
 - **The rate limit is per process.** It uses Django's in-memory cache, so with several workers the effective limit is higher. Next: a shared cache.
@@ -141,8 +142,10 @@ Settings load `.env` from the repository root; variables already set in the shel
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | In production | Comma-separated origins, e.g. `https://your-app.up.railway.app` |
 | `DJANGO_SECURE_SSL_REDIRECT` | No | Redirect HTTP to HTTPS. Defaults to on when `DEBUG` is off |
 | `GEMINI_API_KEY` | For answers | Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey). Without it, every question gets the "busy" response |
-| `GEMINI_ANSWER_MODEL` | No | Default `gemini-3.8-flash` |
+| `GEMINI_ANSWER_MODEL` | No | Default `gemini-3.6-flash` |
 | `GEMINI_TRIAGE_MODEL` | No | Default `gemini-3.5-flash-lite` |
+| `GEMINI_FALLBACK_MODEL` | No | Tried once when the answer model is overloaded or times out. Default `gemini-3.5-flash-lite`; empty disables it |
+| `GEMINI_TRIAGE_TIMEOUT_SECONDS`, `GEMINI_ANSWER_TIMEOUT_SECONDS` | No | Per-call timeouts, default `10` and `20`. Keep triage + 2 × answer under gunicorn's 90-second timeout |
 | `CHAT_RATE_LIMIT_PER_MINUTE` | No | Questions per user per minute (default `10`) |
 
 Use the **Session pooler** connection string from Supabase Dashboard → **Connect**. It works on IPv4 networks, while the direct connection (`db.<ref>.supabase.co`) is IPv6-only unless the IPv4 add-on is enabled. The transaction pooler (port `6543`) is not supported by this configuration, because it does not support prepared statements or server-side cursors.
@@ -224,12 +227,76 @@ python manage.py test chatbot.tests.DatabaseConfigTests chatbot.tests.ModelDefin
 
 ### Loading documents
 
-Passages are searched only when their `Document` has `status=approved`. For good retrieval and citations:
+Load the documents into `chatbot_document` and their passages into `chatbot_documentpassage`, from the Supabase dashboard (Table Editor, SQL editor, or CSV import) or with Django. Only documents with `status = 'approved'` are searched, so you can load as `draft`, check, then approve.
 
-- Split each source into passages of roughly 150 to 400 words, numbered with `chunk_index` from 0.
-- Set `section_heading` and `page_number` when the source has them; they appear in citations.
-- Set `source_url` to the public page a reader should open, `publisher` (IRS, SEC, ...), and `retrieved_at`.
-- Retrieval uses PostgreSQL's `english` text-search configuration.
+**`chatbot_document`**, one row per source:
+
+| Column | Fill in? | Notes |
+| --- | --- | --- |
+| `title` | Required | Shown in citations, up to 500 characters |
+| `publisher` | Required | e.g. IRS, SEC, FINRA |
+| `source_url` | Required | The public page a reader should open; must be unique |
+| `status` | Optional | `draft` (default), `approved`, or `archived` |
+| `retrieved_at` | Recommended | When you downloaded the source |
+| `content_hash` | Optional | e.g. SHA-256 of the downloaded file, to detect changes |
+| `id`, `created_at`, `updated_at` | Leave empty | Filled in by the database |
+
+**`chatbot_documentpassage`**, one row per passage:
+
+| Column | Fill in? | Notes |
+| --- | --- | --- |
+| `document_id` | Required | The `id` of its document |
+| `chunk_index` | Required | 0, 1, 2, ... in reading order; unique within a document |
+| `content` | Required | The passage text; must not be empty |
+| `section_heading` | Recommended | Shown in citations |
+| `page_number` | Optional | 1 or higher; shown in citations |
+| `id`, `created_at` | Leave empty | Filled in by the database |
+
+Guidance for good answers and citations:
+
+- Split each source into passages of about 150 to 400 words, preferably along section boundaries. Each answer sends up to 8 passages to Gemini, so very long passages waste quota, and very short ones lose context.
+- Search uses PostgreSQL's `english` text-search configuration on `content`, so keep the source's own terms ("like-kind", "Section 1031", "Delaware statutory trust").
+- Use the SQL editor or Table Editor (they run as the database owner). Inserts through Supabase's REST API with the `anon` key are rejected on purpose, because every table has row level security without policies.
+- If you change rows with SQL later, set `updated_at = now()` yourself; only Django saves refresh it.
+- To retire a source, set its status to `archived`. A document that still has passages can't be deleted, which keeps logged citations intact.
+
+Example (SQL editor):
+
+```sql
+with doc as (
+  insert into chatbot_document (title, publisher, source_url, retrieved_at)
+  values ('Instructions for Form 8824', 'IRS', 'https://www.irs.gov/instructions/i8824', now())
+  returning id
+)
+insert into chatbot_documentpassage (document_id, chunk_index, section_heading, content)
+select id, 0, 'Deferred exchanges', 'In a deferred exchange, ...' from doc;
+
+-- When the passages look right:
+update chatbot_document set status = 'approved', updated_at = now()
+where source_url = 'https://www.irs.gov/instructions/i8824';
+```
+
+For CSV import, import documents first, then passages with the `document_id` values the documents received. Leave `id` and the timestamp columns out of the column mapping.
+
+## Production readiness test
+
+Run this after loading the documents. `check_corpus` is read-only. `run_eval` calls Gemini (about 2 requests per question) and saves nothing unless you pass `--record`.
+
+1. **Check the data.** `python manage.py check_corpus`
+
+   It lists documents and passages and flags the following.
+   - **Errors:** no approved documents, an approved document with no passages, whitespace-only passages, a missing `GEMINI_API_KEY`.
+   - **Warnings:** passages outside 30 to 600 words, gaps in `chunk_index`, empty `retrieved_at`, no superuser.
+
+   It also shows how each document and each evaluation question ranks in search. It exits with an error status when something would break the chat.
+2. **Tune retrieval if needed.** If evaluation questions that your sources do cover are reported as matching nothing above `MIN_RANK`, lower `MIN_RANK` in `chatbot/retrieval.py`. It is 0.02, a placeholder chosen before real data existed. If unrelated passages rank high, raise it.
+3. **Adjust the questions.** Edit `chatbot/eval_questions.json` so that the questions expecting `answered` match what your sources cover. A case can also require a cited source with `"source_contains": "irs.gov/instructions/i8824"`. Follow-up questions share a `"conversation"` key.
+4. **Run the live evaluation.** `python manage.py run_eval`
+
+   Add `-v 2` to read every answer and its sources, `--only ID ...` to rerun cases, and `--delay 8` if Gemini rate-limits you. A case that fails because Gemini was busy is marked as such; run it again.
+5. **Deploy to Railway** ([below](#deploy-to-railway)), then run the same checks against production with `railway run python manage.py check_corpus` (requires the Railway CLI), or ask the evaluation questions in the browser.
+6. **Record a demo** for the admin log if you want one: `python manage.py run_eval --record --user <username>`. Then confirm the exchanges, sources and timestamps in `/admin/` → **Chat exchanges**.
+7. **Check Supabase's security advisor.** It should report no tables with row level security disabled.
 
 ## Deploy to Railway
 

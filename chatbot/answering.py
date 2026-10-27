@@ -6,8 +6,6 @@ Kept free of HTTP and persistence so every outcome can be tested with a fake LLM
 import time
 from dataclasses import dataclass, field
 
-from django.conf import settings
-
 from . import retrieval, safety
 from .llm import LLMUnavailable, Triage, get_llm
 from .models import ChatExchange
@@ -88,10 +86,10 @@ def _run(question, conversation, llm):
     if passages:
         labelled = [(f'P{i}', p) for i, p in enumerate(passages, start=1)]
         try:
-            grounded = llm.answer(query, labelled)
+            # The model that served may be the fallback; the log records which.
+            grounded, result.model = llm.answer(query, labelled)
         except LLMUnavailable:
             return _finish(result, advice, outcome=Outcome.ERROR, body=safety.UNAVAILABLE)
-        result.model = getattr(llm, 'answer_model', '')
         if grounded.status == 'answered':
             by_label = dict(labelled)
             text, labels = safety.validate_citations(grounded.answer, grounded.cited, by_label)

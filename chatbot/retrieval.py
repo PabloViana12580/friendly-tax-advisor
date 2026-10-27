@@ -32,8 +32,11 @@ def build_query(text):
     return reduce(or_, (SearchQuery(term, search_type='plain', config=SEARCH_CONFIG) for term in terms))
 
 
-def search(text, limit=DEFAULT_LIMIT):
-    """Return up to `limit` approved passages ranked by relevance to `text`."""
+def search(text, limit=DEFAULT_LIMIT, min_rank=MIN_RANK):
+    """Return up to `limit` approved passages ranked by relevance to `text`.
+
+    `min_rank` is overridable so `check_corpus` can show what the cutoff drops.
+    """
     query = build_query(text)
     if query is None:
         return []
@@ -44,7 +47,7 @@ def search(text, limit=DEFAULT_LIMIT):
         .annotate(search=passage_search_vector())
         .filter(search=query)
         .annotate(rank=SearchRank(passage_search_vector(), query))
-        .filter(rank__gte=MIN_RANK)
+        .filter(rank__gte=min_rank)
         .select_related('document')
         .order_by('-rank', 'document_id', 'chunk_index')[:limit]
     )

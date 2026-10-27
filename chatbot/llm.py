@@ -3,10 +3,16 @@
 The model only ever sees the passages passed in; it has no database access.
 """
 
+import logging
 from typing import Literal
 
 from django.conf import settings
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
+
+# Overloaded, rate-limited, or timed out: worth one try on the fallback model.
+RETRYABLE_STATUS_CODES = {429, 500, 503, 504}
 
 TRIAGE_INSTRUCTIONS = """\
 You route questions for Sightbridge, an educational assistant for financial advisors about \
@@ -44,7 +50,16 @@ no disclaimer (the application adds one).
 
 
 class LLMUnavailable(Exception):
-    """The model could not be reached or returned an unusable response."""
+    """The model could not be reached or returned an unusable response.
+
+    `retryable` is True for transient failures (overload, rate limit, timeout,
+    network), where another model may succeed; False for errors such as a bad
+    key or unknown model, which a retry won't fix.
+    """
+
+    def __init__(self, message, retryable=True):
+        super().__init__(message)
+        self.retryable = retryable
 
 
 class Triage(BaseModel):
@@ -80,18 +95,22 @@ def format_passages(labelled):
 
 
 class GeminiClient:
-    def __init__(self, api_key, triage_model, answer_model, timeout_ms=30000):
+    def __init__(self, api_key, triage_model, answer_model, fallback_model='',
+                 triage_timeout_ms=10000, answer_timeout_ms=20000):
         from google import genai
         from google.genai import types
 
         self._types = types
         self.triage_model = triage_model
         self.answer_model = answer_model
-        # The SDK doesn't retry unless retry_options is set; keep it that way so
-        # failures tell the user to try again instead of burning free-tier quota.
-        self._client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=timeout_ms))
+        self.fallback_model = fallback_model
+        self.triage_timeout_ms = triage_timeout_ms
+        self.answer_timeout_ms = answer_timeout_ms
+        # The SDK doesn't retry unless retry_options is set; keep it that way.
+        # The only retry is the single fallback-model attempt in answer().
+        self._client = genai.Client(api_key=api_key)
 
-    def _generate(self, model, instructions, contents, schema):
+    def _generate(self, model, instructions, contents, schema, timeout_ms):
         from google.genai import errors
 
         config = self._types.GenerateContentConfig(
@@ -99,24 +118,46 @@ class GeminiClient:
             response_mime_type='application/json',
             response_schema=schema,
             temperature=0.1,
+            # The SDK also sends this to Gemini as the server-side deadline.
+            http_options=self._types.HttpOptions(timeout=timeout_ms),
         )
         try:
             response = self._client.models.generate_content(model=model, contents=contents, config=config)
         except errors.APIError as exc:
-            raise LLMUnavailable(f'Gemini API error {exc.code}') from exc
-        except Exception as exc:  # network errors, timeouts
-            raise LLMUnavailable(str(exc)) from exc
+            raise LLMUnavailable(f'{model}: Gemini API error {exc.code}',
+                                 retryable=exc.code in RETRYABLE_STATUS_CODES) from exc
+        except Exception as exc:  # network errors, client-side timeouts
+            raise LLMUnavailable(f'{model}: {exc}') from exc
         if not isinstance(response.parsed, schema):
-            raise LLMUnavailable('Gemini returned a response that did not match the schema')
+            raise LLMUnavailable(f'{model}: response did not match the schema')
         return response.parsed
 
     def triage(self, question, history):
         contents = f'Conversation so far:\n{format_history(history) or "(none)"}\n\nLatest question:\n{question}'
-        return self._generate(self.triage_model, TRIAGE_INSTRUCTIONS, contents, Triage)
+        return self._generate(self.triage_model, TRIAGE_INSTRUCTIONS, contents, Triage, self.triage_timeout_ms)
 
     def answer(self, question, labelled_passages):
+        """Return (GroundedAnswer, model that produced it).
+
+        On a transient failure of the answer model, tries the fallback model once.
+        """
         contents = f'Source passages:\n\n{format_passages(labelled_passages)}\n\nQuestion:\n{question}'
-        return self._generate(self.answer_model, ANSWER_INSTRUCTIONS, contents, GroundedAnswer)
+        try:
+            grounded = self._generate(self.answer_model, ANSWER_INSTRUCTIONS, contents, GroundedAnswer,
+                                      self.answer_timeout_ms)
+            return grounded, self.answer_model
+        except LLMUnavailable as exc:
+            if not (exc.retryable and self.fallback_model and self.fallback_model != self.answer_model):
+                logger.warning('Gemini answer failed: %s', exc)
+                raise
+            logger.warning('Gemini answer failed (%s); trying fallback model %s', exc, self.fallback_model)
+        try:
+            grounded = self._generate(self.fallback_model, ANSWER_INSTRUCTIONS, contents, GroundedAnswer,
+                                      self.answer_timeout_ms)
+        except LLMUnavailable as exc:
+            logger.warning('Gemini fallback answer failed: %s', exc)
+            raise
+        return grounded, self.fallback_model
 
 
 _client = None
@@ -127,6 +168,13 @@ def get_llm():
     global _client
     if _client is None:
         if not settings.GEMINI_API_KEY:
-            raise LLMUnavailable('GEMINI_API_KEY is not configured')
-        _client = GeminiClient(settings.GEMINI_API_KEY, settings.GEMINI_TRIAGE_MODEL, settings.GEMINI_ANSWER_MODEL)
+            raise LLMUnavailable('GEMINI_API_KEY is not configured', retryable=False)
+        _client = GeminiClient(
+            settings.GEMINI_API_KEY,
+            settings.GEMINI_TRIAGE_MODEL,
+            settings.GEMINI_ANSWER_MODEL,
+            fallback_model=settings.GEMINI_FALLBACK_MODEL,
+            triage_timeout_ms=settings.GEMINI_TRIAGE_TIMEOUT_SECONDS * 1000,
+            answer_timeout_ms=settings.GEMINI_ANSWER_TIMEOUT_SECONDS * 1000,
+        )
     return _client

@@ -28,7 +28,6 @@ load_dotenv(BASE_DIR / '.env')
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
 def env_list(name, default=''):
     return [item.strip() for item in os.environ.get(name, default).split(',') if item.strip()]
 
@@ -37,6 +36,7 @@ def env_list(name, default=''):
 # Off unless DJANGO_DEBUG=true (set it in your local .env).
 DEBUG = os.environ.get('DJANGO_DEBUG', '').lower() in ('1', 'true', 'yes')
 
+# SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', '')
 if not SECRET_KEY:
     if not DEBUG:
@@ -186,7 +186,14 @@ SECURE_SSL_REDIRECT = os.environ.get('DJANGO_SECURE_SSL_REDIRECT', str(not DEBUG
 
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 GEMINI_TRIAGE_MODEL = os.environ.get('GEMINI_TRIAGE_MODEL', 'gemini-3.5-flash-lite')
-GEMINI_ANSWER_MODEL = os.environ.get('GEMINI_ANSWER_MODEL', 'gemini-3.8-flash')
+GEMINI_ANSWER_MODEL = os.environ.get('GEMINI_ANSWER_MODEL', 'gemini-3.6-flash')
+# Tried once when the answer model is overloaded, rate-limited, or times out.
+# Set to an empty string to disable.
+GEMINI_FALLBACK_MODEL = os.environ.get('GEMINI_FALLBACK_MODEL', 'gemini-3.5-flash-lite')
+# Worst case per question: triage + answer + fallback = 10 + 20 + 20 = 50s,
+# inside gunicorn's timeout in railway.json.
+GEMINI_TRIAGE_TIMEOUT_SECONDS = int(os.environ.get('GEMINI_TRIAGE_TIMEOUT_SECONDS', '10'))
+GEMINI_ANSWER_TIMEOUT_SECONDS = int(os.environ.get('GEMINI_ANSWER_TIMEOUT_SECONDS', '20'))
 # Questions per user per minute; protects the free-tier quota.
 CHAT_RATE_LIMIT_PER_MINUTE = int(os.environ.get('CHAT_RATE_LIMIT_PER_MINUTE', '10'))
 
