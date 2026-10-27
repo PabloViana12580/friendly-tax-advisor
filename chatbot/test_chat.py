@@ -22,11 +22,12 @@ PASSWORD = 'correct-Horse-battery-42'
 class FakeLLM:
     answer_model = 'fake-answer-model'
 
-    def __init__(self, triage=None, answer=None, triage_error=False, answer_error=False):
+    def __init__(self, triage=None, answer=None, triage_error=False, answer_error=False, served_by=None):
         self._triage = triage
         self._answer = answer
         self.triage_error = triage_error
         self.answer_error = answer_error
+        self.served_by = served_by or self.answer_model
         self.triage_calls = []
         self.answer_calls = []
 
@@ -40,7 +41,87 @@ class FakeLLM:
         self.answer_calls.append((question, [label for label, _ in labelled]))
         if self.answer_error:
             raise LLMUnavailable('rate limited')
-        return self._answer
+        return self._answer, self.served_by
+
+
+def api_error(code):
+    from google.genai import errors
+    return errors.APIError(code, {'error': {'code': code, 'message': 'test', 'status': 'TEST'}})
+
+
+class GeminiClientTests(SimpleTestCase):
+    """Fallback and timeout behaviour, with the SDK call mocked (no network)."""
+
+    def setUp(self):
+        from .llm import GeminiClient
+        self.client = GeminiClient('test-key', 'triage-m', 'answer-m', fallback_model='fallback-m',
+                                   triage_timeout_ms=10000, answer_timeout_ms=20000)
+        self.passages = [('P1', mock.Mock(document=mock.Mock(title='Doc'), section_heading='', page_number=None,
+                                          content='Text.'))]
+        self.grounded = GroundedAnswer(status='answered', answer='Text[P1].', cited=['P1'])
+
+    def mock_sdk(self, *effects):
+        patcher = mock.patch.object(self.client._client.models, 'generate_content', side_effect=list(effects))
+        self.addCleanup(patcher.stop)
+        return patcher.start()
+
+    def ok(self, parsed):
+        return mock.Mock(parsed=parsed)
+
+    def models_called(self, sdk):
+        return [call.kwargs['model'] for call in sdk.call_args_list]
+
+    def test_answer_uses_primary_model_with_answer_timeout(self):
+        sdk = self.mock_sdk(self.ok(self.grounded))
+        self.assertEqual(self.client.answer('Q?', self.passages), (self.grounded, 'answer-m'))
+        self.assertEqual(self.models_called(sdk), ['answer-m'])
+        self.assertEqual(sdk.call_args.kwargs['config'].http_options.timeout, 20000)
+
+    def test_overload_falls_back_once(self):
+        for code in (429, 500, 503, 504):
+            with self.subTest(code=code):
+                sdk = self.mock_sdk(api_error(code), self.ok(self.grounded))
+                self.assertEqual(self.client.answer('Q?', self.passages), (self.grounded, 'fallback-m'))
+                self.assertEqual(self.models_called(sdk), ['answer-m', 'fallback-m'])
+
+    def test_network_timeout_falls_back(self):
+        sdk = self.mock_sdk(TimeoutError('read timed out'), self.ok(self.grounded))
+        self.assertEqual(self.client.answer('Q?', self.passages)[1], 'fallback-m')
+        self.assertEqual(len(sdk.call_args_list), 2)
+
+    def test_permanent_errors_do_not_fall_back(self):
+        for code in (400, 401, 403, 404):
+            with self.subTest(code=code):
+                sdk = self.mock_sdk(api_error(code))
+                with self.assertRaises(LLMUnavailable) as raised:
+                    self.client.answer('Q?', self.passages)
+                self.assertFalse(raised.exception.retryable)
+                self.assertEqual(self.models_called(sdk), ['answer-m'])
+
+    def test_fallback_failure_raises(self):
+        sdk = self.mock_sdk(api_error(503), api_error(503))
+        with self.assertRaises(LLMUnavailable):
+            self.client.answer('Q?', self.passages)
+        self.assertEqual(self.models_called(sdk), ['answer-m', 'fallback-m'])
+
+    def test_no_fallback_when_disabled(self):
+        self.client.fallback_model = ''
+        sdk = self.mock_sdk(api_error(503))
+        with self.assertRaises(LLMUnavailable):
+            self.client.answer('Q?', self.passages)
+        self.assertEqual(len(sdk.call_args_list), 1)
+
+    def test_malformed_response_is_unavailable(self):
+        self.mock_sdk(self.ok(None), self.ok(None))
+        with self.assertRaises(LLMUnavailable):
+            self.client.answer('Q?', self.passages)
+
+    def test_triage_uses_triage_model_and_timeout_without_fallback(self):
+        sdk = self.mock_sdk(api_error(503))
+        with self.assertRaises(LLMUnavailable):
+            self.client.triage('Q?', [])
+        self.assertEqual(self.models_called(sdk), ['triage-m'])
+        self.assertEqual(sdk.call_args.kwargs['config'].http_options.timeout, 10000)
 
 
 def make_corpus():
@@ -126,6 +207,13 @@ class PipelineTests(TestCase):
         self.assertEqual(result.sources[0].document.title, 'Instructions for Form 8824')
         self.assertEqual(result.disclaimer, safety.DISCLAIMER)
         self.assertEqual(result.model, 'fake-answer-model')
+
+    def test_records_the_model_that_served_the_answer(self):
+        user = User.objects.create_user('advisor', 'a@example.com', PASSWORD)
+        llm = FakeLLM(answer=GroundedAnswer(status='answered', answer='45 days [P1].', cited=['P1']),
+                      served_by='fallback-model')
+        exchange = record_exchange(user, None, answer_question('When must replacement property be identified?', llm=llm))
+        self.assertEqual(exchange.model, 'fallback-model')
 
     def test_answer_without_valid_citation_becomes_not_found(self):
         llm = FakeLLM(answer=GroundedAnswer(status='answered', answer='Made up [P42].', cited=['P42']))

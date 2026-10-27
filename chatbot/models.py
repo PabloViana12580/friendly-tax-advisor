@@ -1,10 +1,12 @@
 import uuid
 
 from django.conf import settings
+from django.contrib.postgres.functions import RandomUUID
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVector
 from django.db import models
 from django.db.models import Q
+from django.db.models.functions import Now
 
 # Text-search configuration shared by the passage index and future retrieval
 # queries. Queries must use the same expression for PostgreSQL to use the index.
@@ -23,18 +25,21 @@ class Document(models.Model):
         APPROVED = 'approved', 'Approved'
         ARCHIVED = 'archived', 'Archived'
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # db_default values let rows be inserted from the Supabase dashboard, SQL, or
+    # CSV import; Django's Python defaults still apply to ORM saves.
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, db_default=RandomUUID(), editable=False)
     title = models.CharField(max_length=500)
     publisher = models.CharField(max_length=255, help_text='Publishing organization, e.g. IRS, SEC, FINRA.')
     source_url = models.URLField(max_length=2048, unique=True)
-    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT, db_default=Status.DRAFT)
     content_hash = models.CharField(
         max_length=64, null=True, blank=True,
         help_text='Hash of the retrieved source content, used to detect changes.',
     )
     retrieved_at = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_default=Now())
+    # SQL UPDATEs don't refresh this; set updated_at = now() when editing outside Django.
+    updated_at = models.DateTimeField(auto_now=True, db_default=Now())
 
     class Meta:
         ordering = ['title']
@@ -55,7 +60,7 @@ class Document(models.Model):
 class DocumentPassage(models.Model):
     """An extracted passage of a Document; the unit that answers cite."""
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, db_default=RandomUUID(), editable=False)
     # PROTECT: a document with passages cannot be deleted by accident, so
     # citations keep resolving. Retire sources by archiving them instead.
     # db_index=False: the (document, chunk_index) unique index leads with
@@ -67,7 +72,7 @@ class DocumentPassage(models.Model):
     content = models.TextField()
     page_number = models.PositiveIntegerField(null=True, blank=True)
     section_heading = models.CharField(max_length=500, null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_default=Now())
 
     class Meta:
         ordering = ['document', 'chunk_index']
