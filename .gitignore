@@ -72,6 +72,9 @@ instance/
 # Sphinx documentation
 docs/_build/
 
+#skills
+.claude/skills/
+
 # PyBuilder
 .pybuilder/
 target/
