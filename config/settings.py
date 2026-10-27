@@ -29,12 +29,23 @@ load_dotenv(BASE_DIR / '.env')
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY') or 'django-insecure-$8($ppnqdvw+*_nr*h882s=nd*wtz(g85!0*-r!3n=)q7x6kp@'
+def env_list(name, default=''):
+    return [item.strip() for item in os.environ.get(name, default).split(',') if item.strip()]
+
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Off unless DJANGO_DEBUG=true (set it in your local .env).
+DEBUG = os.environ.get('DJANGO_DEBUG', '').lower() in ('1', 'true', 'yes')
 
-ALLOWED_HOSTS = []
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', '')
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured('Set DJANGO_SECRET_KEY (see .env.example).')
+    SECRET_KEY = 'django-insecure-local-development-only'
+
+ALLOWED_HOSTS = env_list('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1')
+# Full origins (https://app.example.com) allowed to POST forms behind HTTPS.
+CSRF_TRUSTED_ORIGINS = env_list('DJANGO_CSRF_TRUSTED_ORIGINS')
 
 
 # Application definition
@@ -51,6 +62,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -165,6 +177,18 @@ SESSION_COOKIE_SAMESITE = 'Lax'
 # Send cookies over HTTPS only once DEBUG is off.
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
+# Railway terminates TLS at its proxy and forwards the original scheme.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_SSL_REDIRECT = os.environ.get('DJANGO_SECURE_SSL_REDIRECT', str(not DEBUG)).lower() in ('1', 'true', 'yes')
+
+
+# Chat assistant (Gemini API, server-side only; never expose the key to templates)
+
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
+GEMINI_TRIAGE_MODEL = os.environ.get('GEMINI_TRIAGE_MODEL', 'gemini-3.5-flash-lite')
+GEMINI_ANSWER_MODEL = os.environ.get('GEMINI_ANSWER_MODEL', 'gemini-3.8-flash')
+# Questions per user per minute; protects the free-tier quota.
+CHAT_RATE_LIMIT_PER_MINUTE = int(os.environ.get('CHAT_RATE_LIMIT_PER_MINUTE', '10'))
 
 
 # Password validation
@@ -203,6 +227,13 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+# WhiteNoise serves collected static files in production. Compression without a
+# manifest, so templates render in tests without running collectstatic first.
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage'},
+}
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
