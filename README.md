@@ -1,8 +1,8 @@
 # Friendly Tax Advisor
 
-An advisor-facing Q&A assistant for educational questions about Section 1031 exchanges, Delaware Statutory Trusts (DSTs), and Section 721 contributions to a REIT operating partnership (often described as a “721 exchange”).
+An advisor-facing Q&A assistant for educational questions about Section 1031 exchanges, Delaware Statutory Trusts (DSTs), Section 721 contributions to a REIT operating partnership (often described as a “721 exchange”), and real estate investment trusts (REITs).
 
-> **Status:** Sign-in, the grounded chat pipeline (retrieval, Gemini answers with validated citations, advice handling, disclaimer), and the admin-only exchange log are implemented. Until approved documents are loaded, every in-scope question gets the "not in the approved sources" response. See [Loading documents](#loading-documents) and [Production readiness test](#production-readiness-test).
+> **Status:** Sign-in, the grounded chat pipeline (retrieval, Gemini answers with validated citations, advice handling, disclaimer), and the admin-only exchange log are implemented. The six approved sources below are loaded, and the live evaluation (`run_eval`) passes locally. See [Production readiness test](#production-readiness-test).
 
 ## Part 1: Advisor Q&A assistant
 
@@ -16,22 +16,18 @@ The application is a simple, authenticated chat for financial advisors. It answe
 - If the approved sources do not support an answer, say so clearly and do not guess.
 - Record each question, answer, cited sources, and timestamp in an admin-only conversation log.
 
-## Public reference set
+## Approved source set
 
-These ten public references are the planned starting corpus for Part 1. The IRS and statutory materials cover like-kind exchanges, DST treatment, partnership contributions, and basis. SEC materials provide REIT background and one issuer-specific example of an operating-partnership structure.
+The chat answers only from these six public documents, loaded into the database as approved (481 passages). The passage CSV files are in `chatbot_sources/`.
 
-1. [IRS Publication 544, Sales and Other Dispositions of Assets](https://www.irs.gov/publications/p544) — overview of like-kind exchanges, recognized gain, and basis.
-2. [IRS Instructions for Form 8824, Like-Kind Exchanges](https://www.irs.gov/instructions/i8824) — reporting and deferred-exchange requirements.
-3. [26 U.S.C. § 1031](https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section1031&num=0&edition=prelim) — statute governing qualifying exchanges of real property.
-4. [26 C.F.R. § 1.1031(k)-1](https://www.ecfr.gov/current/title-26/section-1.1031%28k%29-1) — rules for deferred exchanges.
-5. [IRS Revenue Ruling 2004-86](https://www.irs.gov/irb/2004-33_IRB#RR-2004-86) — federal tax classification and Section 1031 treatment of the DST arrangement described in the ruling.
-6. [26 U.S.C. § 721](https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section721&num=0&edition=prelim) — general nonrecognition rule for property contributed to a partnership for a partnership interest, subject to statutory exceptions.
-7. [26 C.F.R. § 1.721-1](https://www.ecfr.gov/current/title-26/section-1.721-1) — regulations on nonrecognition for partnership contributions.
-8. [SEC Investor Bulletin: Real Estate Investment Trusts (REITs)](https://www.sec.gov/files/reits.pdf) — REIT structure and investor basics.
-9. [ExchangeRight Income Fund 2025 Form 10-K](https://www.sec.gov/Archives/edgar/data/1771514/000119312526075069/none-20251231.htm) — issuer-specific example describing an UPREIT, its operating partnership, and OP-unit holders.
-10. [IRS Publication 551, Basis of Assets](https://www.irs.gov/publications/p551) — basis concepts relevant to property exchanges and contributions.
+1. [IRS Publication 544 (2025), Sales and Other Dispositions of Assets](https://www.irs.gov/publications/p544) (176 passages): like-kind exchanges, deferred exchanges and qualified intermediaries, partially nontaxable exchanges (money or unlike property received, often called "boot"), basis, and reporting.
+2. [IRS Fact Sheet FS-2008-18, Like-Kind Exchanges Under IRC Section 1031](https://www.irs.gov/pub/irs-news/fs-08-18.pdf) (12 passages): a plain-language overview covering who qualifies, exchange structures, the 45-day and 180-day limits, basis, and reporting on Form 8824.
+3. [26 C.F.R. § 1.1031(k)-1, Treatment of deferred exchanges](https://www.ecfr.gov/current/title-26/chapter-I/subchapter-A/part-1/subject-group-ECFRbf83dcc4bd89326/section-1.1031%28k%29-1) (51 passages): the Treasury regulation on identification and receipt rules, safe harbors including qualified intermediaries, and basis in deferred exchanges.
+4. [Internal Revenue Bulletin 2004-33](https://www.irs.gov/irb/2004-33_IRB) (209 passages): contains Revenue Ruling 2004-86 on the tax classification of a Delaware statutory trust and the Section 1031 treatment of DST interests. The bulletin's other items (health savings accounts, S corporations, procedures) are loaded too, but questions about them are out of scope.
+5. [Revenue Ruling 99-5, Section 721 nonrecognition of gain or loss on contribution](https://www.irs.gov/pub/irs-drop/rr-99-5.pdf) (16 passages): how Section 721 and related sections apply when a single-member LLC becomes a partnership.
+6. [SEC Investor Bulletin: Real Estate Investment Trusts (REITs)](https://www.sec.gov/files/reits.pdf) (17 passages): what a REIT is, how a company qualifies, equity, mortgage, and hybrid REITs, publicly traded versus non-traded REITs, and tax considerations for shareholders.
 
-Revenue Ruling 2004-86 applies to the facts it describes, and the SEC filing illustrates only that issuer’s structure. Neither establishes the terms or tax result for another DST, REIT, or investor. Before supporting product-specific answers, add current public transaction documents and ground each claim in the document that supports it.
+**Coverage limits.** The set covers REIT basics but has no material on UPREIT operating partnerships or OP units. Questions about 721 exchanges into a REIT's operating partnership are answered only from the general Section 721 rule in Revenue Ruling 99-5 and the SEC's REIT basics; anything beyond that gets the "not covered" response. Revenue Ruling 2004-86 applies to the facts it describes and does not establish the terms or tax result of any other DST, and the SEC bulletin is general investor education, not guidance on any specific REIT.
 
 ## How the chat works
 
@@ -40,14 +36,18 @@ The language model never reads the database. Django retrieves the passages and s
 ```
 POST /chat/ask/
  1. Triage       Gemini (flash-lite) classifies the question as educational,
-                 personalized advice, or out of scope, and rewrites follow-ups
-                 into a standalone query using the last 3 turns.
+                 personalized advice, or out of scope, rewrites follow-ups
+                 into a standalone query using the last 3 turns, and lists
+                 2-4 search phrases in the sources' formal wording ("boot" ->
+                 "money or unlike property received").
                  If Gemini is unavailable, a keyword rule decides.
  2. Route        Out of scope: fixed scope message, no further calls.
                  Personalized advice: decline, then continue with the
                  depersonalized general question.
  3. Retrieve     PostgreSQL full-text search (GIN index) over passages of
-                 approved documents only; top 8 above a relevance threshold.
+                 approved documents only. Each search phrase and the question
+                 are searched separately, words weighted by rarity (IDF), and
+                 the lists merged (reciprocal rank fusion); top 8 are kept.
                  No matches: "not in the approved sources", no answer call.
  4. Answer       Gemini (3.6 flash) gets only the labelled passages P1..P8 and
                  returns JSON: status, answer with [P#] markers, cited labels.
@@ -74,7 +74,7 @@ Every exchange is visible to staff at `/admin/` under **Chat exchanges**. Each e
 ### What's left out, and what I'd build next
 
 - **No ingestion pipeline.** Documents are loaded by hand (see [Loading documents](#loading-documents)). Next: a script that downloads each source, splits it into passages, and records `content_hash` so changed sources can be re-ingested.
-- **Lexical retrieval only.** Full-text search misses paraphrases ("swap" vs. "like-kind exchange"); the triage rewrite helps. Next: measure misses with an evaluation set and add pgvector embeddings for hybrid search if needed.
+- **Lexical retrieval only.** Full-text search misses paraphrases ("swap" vs. "like-kind exchange"). Triage search phrases in the sources' wording and IDF-weighted ranking cover the common cases in the evaluation set. Next: add pgvector embeddings for hybrid search if misses show up in the log.
 - **The evaluation is manual.** `run_eval` checks the outcome of a fixed question set, but not the wording or accuracy of answers, and it isn't run in CI. Next: grade answers against expected facts and run it on every change.
 - **No streaming.** Answers appear when complete, usually in a few seconds.
 - **No login rate limiting or account lockout.**
@@ -204,7 +204,7 @@ The `chatbot` app owns all application models in `chatbot/models.py`. Django mig
 - **`Conversation`** groups a user's exchanges for follow-up questions.
 - **`ChatExchange`** is the audit log: question, standalone query, category, outcome (`answered` / `not_found` / `declined_advice` / `out_of_scope` / `error`), answer, disclaimer, retrieved passage IDs, model, latency, and timestamp. Deleting a user or conversation that has exchanges is blocked (`PROTECT`).
 - **`ExchangeCitation`** stores each cited source with a snapshot of the document title, URL, section, page, and passage text.
-- Full-text search uses a GIN index on `to_tsvector('english', content)`. Queries must use `chatbot.models.passage_search_vector()` for PostgreSQL to use the index.
+- Full-text search uses `search_vector`, a stored column that PostgreSQL generates from `section_heading` (weight A) and `content` (weight B) on every insert and update, including SQL and CSV loads, with a GIN index on it (migration `0007`). `chatbot/retrieval.py` queries it directly.
 - Migrations `0002`, `0003`, and `0005` enable row level security, with no policies, on every chatbot table and on Django's built-in tables (`auth_*`, `django_*`). This blocks Supabase's Data API (`anon` / `authenticated` roles), while Django, which connects as the table owner, is unaffected. Any new table in `public` also needs RLS enabled; the test suite fails if one does not have it.
 
 ### Tests
@@ -255,12 +255,12 @@ Load the documents into `chatbot_document` and their passages into `chatbot_docu
 Guidance for good answers and citations:
 
 - Split each source into passages of about 150 to 400 words, preferably along section boundaries. Each answer sends up to 8 passages to Gemini, so very long passages waste quota, and very short ones lose context.
-- Search uses PostgreSQL's `english` text-search configuration on `content`, so keep the source's own terms ("like-kind", "Section 1031", "Delaware statutory trust").
+- Search uses PostgreSQL's `english` text-search configuration on `section_heading` and `content`, so keep the source's own terms ("like-kind", "Section 1031", "Delaware statutory trust") and fill in descriptive headings.
 - Use the SQL editor or Table Editor (they run as the database owner). Inserts through Supabase's REST API with the `anon` key are rejected on purpose, because every table has row level security without policies.
 - If you change rows with SQL later, set `updated_at = now()` yourself; only Django saves refresh it.
 - To retire a source, set its status to `archived`. A document that still has passages can't be deleted, which keeps logged citations intact.
 
-Example (SQL editor):
+Example of adding a sixth source (SQL editor):
 
 ```sql
 with doc as (
@@ -289,8 +289,8 @@ Run this after loading the documents. `check_corpus` is read-only. `run_eval` ca
    - **Warnings:** passages outside 30 to 600 words, gaps in `chunk_index`, empty `retrieved_at`, no superuser.
 
    It also shows how each document and each evaluation question ranks in search. It exits with an error status when something would break the chat.
-2. **Tune retrieval if needed.** If evaluation questions that your sources do cover are reported as matching nothing above `MIN_RANK`, lower `MIN_RANK` in `chatbot/retrieval.py`. It is 0.02, a placeholder chosen before real data existed. If unrelated passages rank high, raise it.
-3. **Adjust the questions.** Edit `chatbot/eval_questions.json` so that the questions expecting `answered` match what your sources cover. A case can also require a cited source with `"source_contains": "irs.gov/instructions/i8824"`. Follow-up questions share a `"conversation"` key.
+2. **Tune retrieval if needed.** If evaluation questions that your sources do cover are reported as matching nothing above `MIN_RANK`, lower `MIN_RANK` in `chatbot/retrieval.py`. On the six loaded sources, relevant passages rank 0.2 to 0.6 and unrelated ones down to about 0.01, so the 0.02 cutoff only drops incidental matches. Whether the passages actually answer the question is left to the answer model.
+3. **Adjust the questions.** Edit `chatbot/eval_questions.json` so that the questions expecting `answered` match what your sources cover. A case can also require a cited source with `"source_contains": "rr-99-5"`. Follow-up questions share a `"conversation"` key.
 4. **Run the live evaluation.** `python manage.py run_eval`
 
    Add `-v 2` to read every answer and its sources, `--only ID ...` to rerun cases, and `--delay 8` if Gemini rate-limits you. A case that fails because Gemini was busy is marked as such; run it again.

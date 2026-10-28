@@ -21,7 +21,7 @@ SUGGESTED_QUESTIONS = [
     {'topic': '1031 exchange', 'text': 'What makes real property “like-kind” under Section 1031?'},
     {'topic': '1031 exchange', 'text': 'How do the 45-day identification and 180-day exchange periods work?'},
     {'topic': 'DST', 'text': 'How does Revenue Ruling 2004-86 treat interests in a Delaware Statutory Trust?'},
-    {'topic': '721 exchange', 'text': 'What is a Section 721 contribution to a REIT operating partnership?'},
+    {'topic': '721 exchange', 'text': 'What does Section 721 say about contributing property to a partnership?'},
 ]
 
 

@@ -199,10 +199,13 @@ class DocumentSchemaTests(TestCase):
     def test_full_text_search_uses_indexed_expression(self):
         self.create_passage(content='The replacement property must be identified within 45 days.')
         self.create_passage(chunk_index=1, content='REITs distribute most taxable income.')
-        matches = DocumentPassage.objects.annotate(search=passage_search_vector()).filter(
-            search=SearchQuery('identify replacement', config='english'),
+        matches = DocumentPassage.objects.filter(
+            search_vector=SearchQuery('identify replacement', config='english'),
         )
         self.assertEqual([p.chunk_index for p in matches], [0])
+        # The stored column holds the same expression as passage_search_vector().
+        computed = DocumentPassage.objects.annotate(search=passage_search_vector()).get(chunk_index=0)
+        self.assertEqual(computed.search, computed.search_vector)
 
     def test_row_level_security_enabled_on_all_public_tables(self):
         # Supabase exposes the public schema through its Data API.

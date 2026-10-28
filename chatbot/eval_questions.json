@@ -20,19 +20,21 @@
     "expect": "answered"
   },
   {
+    "id": "intermediary",
+    "question": "What is a qualified intermediary in a deferred exchange?",
+    "expect": "answered"
+  },
+  {
     "id": "dst",
     "question": "How does Revenue Ruling 2004-86 treat an interest in a Delaware statutory trust?",
-    "expect": "answered"
+    "expect": "answered",
+    "source_contains": "2004-33_IRB"
   },
   {
     "id": "section-721",
     "question": "What does Section 721 say about contributing property to a partnership in exchange for a partnership interest?",
-    "expect": "answered"
-  },
-  {
-    "id": "reit",
-    "question": "What is a real estate investment trust (REIT)?",
-    "expect": "answered"
+    "expect": "answered",
+    "source_contains": "rr-99-5"
   },
   {
     "id": "follow-up-1",
@@ -55,6 +57,23 @@
     "id": "advice-qualify",
     "question": "Does my rental condo qualify for a 1031 exchange if I sell it next month?",
     "expect": "declined_advice"
+  },
+  {
+    "id": "reit",
+    "question": "What is a real estate investment trust (REIT), and how does a company qualify as one?",
+    "expect": "answered",
+    "source_contains": "sec.gov/files/reits"
+  },
+  {
+    "id": "non-traded-reit",
+    "question": "How do non-traded REITs differ from publicly traded REITs?",
+    "expect": "answered",
+    "source_contains": "sec.gov/files/reits"
+  },
+  {
+    "id": "upreit",
+    "question": "How is an UPREIT structured, and what are OP units?",
+    "expect": "not_found"
   },
   {
     "id": "not-in-sources",

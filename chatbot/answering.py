@@ -79,7 +79,9 @@ def _run(question, conversation, llm):
     query = (triage.general_question if advice else triage.standalone_query).strip() or question
     result = ChatResult(question, triage.category, Outcome.ANSWERED, '', standalone_query=query)
 
-    passages = retrieval.search(query)
+    # Keywords in the sources' own wording find specific passages better than the
+    # whole question, whose common words dominate; the question adds what they miss.
+    passages = retrieval.search_combined([*triage.search_terms.split(';'), query])
     result.retrieved_ids = [str(p.pk) for p in passages]
 
     body = None
