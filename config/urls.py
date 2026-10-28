@@ -6,9 +6,19 @@ The `urlpatterns` list routes URLs to views. For more information please see:
 """
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
+from django.http import HttpResponse
 from django.urls import include, path
+from django.views.decorators.http import require_GET
+
+
+@require_GET
+def healthz(request):
+    """Liveness check for the host's health checks: no login, no database query."""
+    return HttpResponse('ok', content_type='text/plain')
+
 
 urlpatterns = [
+    path('healthz', healthz, name='healthz'),
     path('', include('chatbot.urls')),
     path(
         'accounts/login/',

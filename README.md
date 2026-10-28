@@ -138,8 +138,8 @@ Settings load `.env` from the repository root; variables already set in the shel
 | `DB_CONN_MAX_AGE` | No | Persistent-connection lifetime in seconds (default `60`) |
 | `DJANGO_SECRET_KEY` | Yes, unless `DJANGO_DEBUG=true` | Django secret key |
 | `DJANGO_DEBUG` | No | `true` for local development only. Off by default |
-| `DJANGO_ALLOWED_HOSTS` | In production | Comma-separated host names (default `localhost,127.0.0.1`) |
-| `DJANGO_CSRF_TRUSTED_ORIGINS` | In production | Comma-separated origins, e.g. `https://your-app.up.railway.app` |
+| `DJANGO_ALLOWED_HOSTS` | For a custom domain | Comma-separated host names (default `localhost,127.0.0.1`). On Render, the `onrender.com` host is added automatically from `RENDER_EXTERNAL_HOSTNAME` |
+| `DJANGO_CSRF_TRUSTED_ORIGINS` | For a custom domain | Comma-separated origins, e.g. `https://advisor.example.com`. The Render origin is added automatically |
 | `DJANGO_SECURE_SSL_REDIRECT` | No | Redirect HTTP to HTTPS. Defaults to on when `DEBUG` is off |
 | `GEMINI_API_KEY` | For answers | Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey). Without it, every question gets the "busy" response |
 | `GEMINI_ANSWER_MODEL` | No | Default `gemini-3.6-flash` |
@@ -294,25 +294,51 @@ Run this after loading the documents. `check_corpus` is read-only. `run_eval` ca
 4. **Run the live evaluation.** `python manage.py run_eval`
 
    Add `-v 2` to read every answer and its sources, `--only ID ...` to rerun cases, and `--delay 8` if Gemini rate-limits you. A case that fails because Gemini was busy is marked as such; run it again.
-5. **Deploy to Railway** ([below](#deploy-to-railway)), then run the same checks against production with `railway run python manage.py check_corpus` (requires the Railway CLI), or ask the evaluation questions in the browser.
+5. **Deploy to Render** ([below](#deploy-to-render)). Production shares the database with development, so `check_corpus` and `run_eval` results apply to it as well. Then ask a few evaluation questions in the browser.
 6. **Record a demo** for the admin log if you want one: `python manage.py run_eval --record --user <username>`. Then confirm the exchanges, sources and timestamps in `/admin/` → **Chat exchanges**.
 7. **Check Supabase's security advisor.** It should report no tables with row level security disabled.
 
-## Deploy to Railway
+## Deploy to Render
 
-The app runs on Railway with gunicorn and serves static files with WhiteNoise. `railway.json` sets the start command, which runs `collectstatic` and then gunicorn. `.python-version` pins Python 3.13.
+The app runs on a [Render](https://render.com) free web service with gunicorn, and WhiteNoise serves the static files. The database stays on Supabase. Render reads `.python-version` and installs Python 3.13.
 
-1. Create a Railway project from this GitHub repository.
-2. In the service's **Variables**, set:
-   - `DATABASE_URL`: the Supabase session pooler URI;
-   - `DJANGO_SECRET_KEY`: a new random value, not the local one;
-   - `GEMINI_API_KEY`;
-   - `DJANGO_ALLOWED_HOSTS`: the Railway domain, e.g. `your-app.up.railway.app`;
-   - `DJANGO_CSRF_TRUSTED_ORIGINS`: `https://your-app.up.railway.app`.
+### Service settings
 
-   Leave `DJANGO_DEBUG` unset.
-3. Generate a public domain under **Settings → Networking**, then set the two host variables to match it.
-4. Migrations are not run on deploy. Run them yourself against the database, after confirming the target, with `python manage.py migrate`.
-5. Create the administrator with `python manage.py createsuperuser`, and the advisor accounts as described in [User accounts](#user-accounts).
+Create a **Web Service** from this GitHub repository, then fill in:
 
-With `DEBUG` off, session and CSRF cookies are secure-only, and the app trusts Railway's `X-Forwarded-Proto` header for HTTPS.
+| Field | Value | Why |
+| --- | --- | --- |
+| Language | Python 3 | |
+| Branch | `main` | Each push to `main` redeploys automatically |
+| Region | Oregon (US West) | Same region as the Supabase database (`us-west-2`), so database queries stay fast |
+| Root directory | Leave empty | `manage.py` is at the repository root |
+| Build command | `pip install -r requirements.txt && python manage.py collectstatic --noinput` | Installs dependencies and collects static files into the build |
+| Start command | `gunicorn config.wsgi --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 90 --access-logfile -` | One process with 4 threads fits the free instance's 512 MB, and keeps the in-memory rate limit accurate. Up to 4 questions are answered at once while others wait on Gemini. The 90-second timeout covers the slowest question (triage 10 s + answer 20 s + fallback 20 s) |
+| Instance type | Free | |
+| Health check path | `/healthz` | Returns `ok` without a login or a database query |
+| Pre-deploy command | Leave empty | Available on paid instances only. Migrations aren't run on deploy anyway (see below) |
+| Secret files | None | All configuration is environment variables. Never upload `.env`: the app loads a `.env` file at the repository root, and the local one turns debug mode on |
+
+### Environment variables
+
+| Variable | Value |
+| --- | --- |
+| `DATABASE_URL` | The same Supabase **session pooler** URI as in your local `.env` (port `5432`). The direct connection is IPv6-only, and the transaction pooler (port `6543`) isn't supported |
+| `DJANGO_SECRET_KEY` | A new random value, not your local one. Use Render's **Generate** button |
+| `GEMINI_API_KEY` | Your Gemini API key |
+
+That is all that's required. Don't set `DJANGO_DEBUG`. Render sets `RENDER_EXTERNAL_HOSTNAME` (e.g. `your-app.onrender.com`) itself, and the settings add it to `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS`. Set `DJANGO_ALLOWED_HOSTS` and `DJANGO_CSRF_TRUSTED_ORIGINS` only if you add a custom domain. The optional Gemini and rate-limit variables in the table above keep their defaults.
+
+### Migrations and accounts
+
+Production uses the same Supabase database as development, so it already has every migration, the documents, and the user accounts. Render doesn't run `migrate`. When a future change adds a migration, apply it once from your machine with `python manage.py migrate`, after confirming the target database, before or right after pushing. Create more users locally as described in [User accounts](#user-accounts); they work on the deployed site immediately.
+
+### After the first deploy
+
+1. Open `https://your-app.onrender.com/healthz`. It should show `ok`.
+2. Sign in, ask one of the suggested questions, and check that the answer cites a source.
+3. Open `/admin/` as the superuser and find the exchange under **Chat exchanges**.
+
+With `DEBUG` off, cookies are secure-only and plain HTTP redirects to HTTPS. The app trusts the `X-Forwarded-Proto` header from Render's proxy. `/healthz` is exempt from the redirect so that health checks over plain HTTP succeed.
+
+**Free-tier behavior.** The service sleeps after 15 minutes without traffic, and the next visit takes about a minute while it wakes up. Each deploy builds a fresh copy, which is fine because nothing is stored on the service's disk. Gemini's free tier allows 20 `gemini-3.6-flash` requests a day per project; after that, `gemini-3.5-flash-lite` answers. When both are used up, users see the "busy" message until the quota resets. With no billing account on the Gemini project, nothing is charged.

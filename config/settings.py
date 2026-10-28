@@ -46,6 +46,12 @@ if not SECRET_KEY:
 ALLOWED_HOSTS = env_list('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1')
 # Full origins (https://app.example.com) allowed to POST forms behind HTTPS.
 CSRF_TRUSTED_ORIGINS = env_list('DJANGO_CSRF_TRUSTED_ORIGINS')
+# Render sets this to the service's onrender.com host name, so no host
+# variables are needed there unless you add a custom domain.
+RENDER_EXTERNAL_HOSTNAME = os.environ.get('RENDER_EXTERNAL_HOSTNAME', '')
+if RENDER_EXTERNAL_HOSTNAME:
+    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
+    CSRF_TRUSTED_ORIGINS.append(f'https://{RENDER_EXTERNAL_HOSTNAME}')
 
 
 # Application definition
@@ -177,9 +183,11 @@ SESSION_COOKIE_SAMESITE = 'Lax'
 # Send cookies over HTTPS only once DEBUG is off.
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
-# Railway terminates TLS at its proxy and forwards the original scheme.
+# The host (Render) terminates TLS at its proxy and forwards the original scheme.
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SECURE_SSL_REDIRECT = os.environ.get('DJANGO_SECURE_SSL_REDIRECT', str(not DEBUG)).lower() in ('1', 'true', 'yes')
+# The host's health checks may arrive over plain HTTP; answer them directly.
+SECURE_REDIRECT_EXEMPT = [r'^healthz$']
 
 
 # Chat assistant (Gemini API, server-side only; never expose the key to templates)
@@ -191,7 +199,7 @@ GEMINI_ANSWER_MODEL = os.environ.get('GEMINI_ANSWER_MODEL', 'gemini-3.6-flash')
 # Set to an empty string to disable.
 GEMINI_FALLBACK_MODEL = os.environ.get('GEMINI_FALLBACK_MODEL', 'gemini-3.5-flash-lite')
 # Worst case per question: triage + answer + fallback = 10 + 20 + 20 = 50s,
-# inside gunicorn's timeout in railway.json.
+# inside gunicorn's 90-second timeout (README "Deploy to Render").
 GEMINI_TRIAGE_TIMEOUT_SECONDS = int(os.environ.get('GEMINI_TRIAGE_TIMEOUT_SECONDS', '10'))
 GEMINI_ANSWER_TIMEOUT_SECONDS = int(os.environ.get('GEMINI_ANSWER_TIMEOUT_SECONDS', '20'))
 # Questions per user per minute; protects the free-tier quota.

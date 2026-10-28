@@ -15,7 +15,7 @@ Windows with Git Bash. The virtualenv is `.venv` (Python 3.13); call its interpr
 .venv/Scripts/python.exe manage.py check
 .venv/Scripts/python.exe manage.py makemigrations --check --dry-run
 .venv/Scripts/python.exe manage.py migrate                       # writes to the shared Supabase DB (see Database)
-.venv/Scripts/python.exe manage.py test --noinput                # all 112 tests, about 6 minutes
+.venv/Scripts/python.exe manage.py test --noinput                # all 114 tests, about 6 minutes
 .venv/Scripts/python.exe manage.py test chatbot.test_chat        # chat pipeline only, about 3 minutes
 .venv/Scripts/python.exe manage.py check_corpus                  # read-only readiness check of loaded documents
 .venv/Scripts/python.exe manage.py run_eval -v 2                 # LIVE Gemini end-to-end eval; rolls back unless --record
@@ -76,7 +76,7 @@ Django templates + Bootstrap 5.3.3 (jsDelivr, with SRI hashes) + `static/css/sig
 - **Dev and production share one Supabase project** (the one in `.mcp.json`). `migrate` and any data you write affect both. Django connects with the session pooler URI (port 5432); the transaction pooler (6543) is not supported.
 - There is no SQLite fallback; missing or non-TLS config raises `ImproperlyConfigured`.
 - Tests create a temporary `test_postgres` database on the same server. Supavisor keeps a connection to it open, so `config/test_runner.py` drops it with `DROP DATABASE ... WITH (FORCE)`. If a failed run leaves `test_postgres` behind, drop it that way.
-- Railway runs `railway.json`'s start command (collectstatic, then gunicorn); WhiteNoise serves static files; `.python-version` pins 3.13. Migrations are not run on deploy. Gunicorn does not run on Windows, so production mode is only checked locally with `runserver`.
+- Hosting is a Render free web service, configured in the dashboard. The build and start commands, health check path, and environment variables are in README "Deploy to Render" (gunicorn: 1 worker, 4 threads, 90 s timeout). `/healthz` (in `config/urls.py`) is exempt from the HTTPS redirect. `RENDER_EXTERNAL_HOSTNAME` is added to `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` in settings. WhiteNoise serves static files, and `.python-version` pins 3.13. Migrations are not run on deploy, and pre-deploy commands are paid-only. Railway was dropped (no free plan for the user). Gunicorn does not run on Windows, so production mode is only checked locally with `runserver`.
 - `DEBUG` is off unless `DJANGO_DEBUG=true`; with it off, cookies are secure-only and HTTP redirects to HTTPS.
 
 ## Conventions and pitfalls
@@ -96,6 +96,6 @@ Django templates + Bootstrap 5.3.3 (jsDelivr, with SRI hashes) + `static/css/sig
 
 ## Status and loose ends
 
-As of 2026-10-27 work is on `main`. The six sources are loaded and approved, `run_eval` passes locally, and a superuser exists. Not deployed yet: Railway's free plan is no longer available to the user, so the next host is a free tier elsewhere (Render recommended); then follow README "Production readiness test" steps 5-7. Verify with `git status` and the database before relying on this list.
+As of 2026-10-27 work is on `main`. The six sources are loaded and approved, `run_eval` passes locally, and a superuser exists. The repo is ready for Render (README "Deploy to Render"); the user is creating the service in the dashboard. Then follow README "Production readiness test" steps 5-7. Verify with `git status` and the database before relying on this list.
 
 Known small items: the rate limit is per process (in-memory cache); there is no login throttling; the free tier allows only 20 `gemini-3.6-flash` requests per day per project, after which every answer comes from the `flash-lite` fallback (measured 2026-10-27).

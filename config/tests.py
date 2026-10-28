@@ -1,10 +1,46 @@
+import json
+import os
+import subprocess
+import sys
+
+from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
 User = get_user_model()
 PASSWORD = 'correct-Horse-battery-42'
+
+
+class DeploymentTests(SimpleTestCase):
+    @override_settings(SECURE_SSL_REDIRECT=True)
+    def test_health_check_needs_no_login_or_https(self):
+        response = self.client.get('/healthz')
+        self.assertEqual((response.status_code, response.content), (200, b'ok'))
+        self.assertEqual(self.client.post('/healthz').status_code, 405)
+        # Other pages still redirect plain HTTP to HTTPS.
+        self.assertEqual(self.client.get(reverse('login')).status_code, 301)
+
+    def test_render_host_name_is_trusted(self):
+        """Production settings, imported in a fresh process with Render's variable set."""
+        env = {
+            **os.environ,
+            'DJANGO_SETTINGS_MODULE': 'config.settings',
+            'DJANGO_DEBUG': 'false',
+            'DJANGO_SECRET_KEY': 'test-only-secret',
+            'RENDER_EXTERNAL_HOSTNAME': 'sightbridge.onrender.com',
+        }
+        script = (
+            'import json; from django.conf import settings; '
+            'print(json.dumps([settings.DEBUG, settings.ALLOWED_HOSTS, settings.CSRF_TRUSTED_ORIGINS]))'
+        )
+        output = subprocess.run([sys.executable, '-c', script], env=env, cwd=settings.BASE_DIR,
+                                capture_output=True, text=True, check=True).stdout
+        debug, hosts, origins = json.loads(output)
+        self.assertFalse(debug)
+        self.assertIn('sightbridge.onrender.com', hosts)
+        self.assertIn('https://sightbridge.onrender.com', origins)
 
 
 class LoginTests(TestCase):
