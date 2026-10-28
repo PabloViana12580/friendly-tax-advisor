@@ -3,7 +3,7 @@ import uuid
 from django.conf import settings
 from django.contrib.postgres.functions import RandomUUID
 from django.contrib.postgres.indexes import GinIndex
-from django.contrib.postgres.search import SearchVector
+from django.contrib.postgres.search import SearchVector, SearchVectorField
 from django.db import models
 from django.db.models import Q
 from django.db.models.functions import Now
@@ -14,7 +14,11 @@ SEARCH_CONFIG = 'english'
 
 
 def passage_search_vector():
-    return SearchVector('content', config=SEARCH_CONFIG)
+    """Section heading (weight A) and passage text (weight B), parsed for full-text search."""
+    return (
+        SearchVector('section_heading', config=SEARCH_CONFIG, weight='A')
+        + SearchVector('content', config=SEARCH_CONFIG, weight='B')
+    )
 
 
 class Document(models.Model):
@@ -73,6 +77,11 @@ class DocumentPassage(models.Model):
     page_number = models.PositiveIntegerField(null=True, blank=True)
     section_heading = models.CharField(max_length=500, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_default=Now())
+    # Computed by PostgreSQL on every insert and update, including SQL and CSV
+    # loads, so retrieval never re-parses passage text at query time.
+    search_vector = models.GeneratedField(
+        expression=passage_search_vector(), output_field=SearchVectorField(), db_persist=True,
+    )
 
     class Meta:
         ordering = ['document', 'chunk_index']
@@ -91,7 +100,7 @@ class DocumentPassage(models.Model):
             ),
         ]
         indexes = [
-            GinIndex(passage_search_vector(), name='chatbot_passage_search_idx'),
+            GinIndex(fields=['search_vector'], name='chatbot_passage_search_idx'),
         ]
 
     def __str__(self):

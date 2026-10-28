@@ -14,12 +14,12 @@ DECLINE_ADVICE = (
 )
 DECLINE_GENERAL_INTRO = 'Here is general information from the approved sources:'
 OUT_OF_SCOPE = (
-    'I only answer general questions about 1031 exchanges, Delaware Statutory Trusts, and '
-    '721 exchanges, using the approved source set.'
+    'I only answer general questions about 1031 exchanges, Delaware Statutory Trusts, '
+    '721 exchanges, and REITs, using the approved source set.'
 )
 NOT_FOUND = (
     'The approved sources don’t cover this, so I can’t answer it. Try rephrasing, or ask '
-    'about 1031 exchanges, Delaware Statutory Trusts, or 721 exchanges.'
+    'about 1031 exchanges, Delaware Statutory Trusts, 721 exchanges, or REITs.'
 )
 UNAVAILABLE = 'The assistant is busy right now. Wait a minute and ask again.'
 
@@ -71,5 +71,7 @@ def validate_citations(answer, cited, allowed_labels):
             number_for(label)
     # Attach markers to the preceding word and tidy spaces left by removed markers.
     text = re.sub(r'[ \t]+(\[\d+\])', r'\1', text)
-    text = re.sub(r'[ \t]+([.,;:])', r'\1', re.sub(r'[ \t]{2,}', ' ', text)).strip()
+    text = re.sub(r'(\[\d+\])[ \t]*,[ \t]*(?=\[\d+\])', r'\1', text)  # "[2], [1]" -> "[2][1]"
+    text = re.sub(r'[ \t]+([.,;:])', r'\1', re.sub(r'[ \t]{2,}', ' ', text))
+    text = '\n'.join(line.strip() for line in text.split('\n')).strip()
     return text, order

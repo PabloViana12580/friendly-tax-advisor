@@ -161,6 +161,10 @@ class CitationValidationTests(SimpleTestCase):
         self.assertEqual(text, 'A. B[1].')
         self.assertEqual(labels, ['P1'])
 
+    def test_adjacent_markers_and_paragraph_spacing_are_tidied(self):
+        text, _ = safety.validate_citations('A [P2], [P1]. \n\n B [P1].', [], ['P1', 'P2'])
+        self.assertEqual(text, 'A[1][2].\n\nB[2].')
+
     def test_answer_without_valid_citations_has_no_labels(self):
         self.assertEqual(safety.validate_citations('Unsupported claim.', [], ['P1'])[1], [])
 
@@ -192,6 +196,25 @@ class RetrievalTests(TestCase):
 
     def test_stop_words_only_returns_empty(self):
         self.assertEqual(retrieval.search('what is the'), [])
+
+    def test_rare_term_outranks_common_terms(self):
+        document = Document.objects.get(status=Document.Status.APPROVED)
+        for index in range(2, 6):
+            DocumentPassage.objects.create(
+                document=document, chunk_index=index,
+                content='Property exchanged for like-kind property in an exchange of property.',
+            )
+        DocumentPassage.objects.create(
+            document=document, chunk_index=6,
+            content='A qualified intermediary holds the exchange proceeds.',
+        )
+        results = retrieval.search('What is a qualified intermediary in a like-kind property exchange?')
+        self.assertEqual(results[0].chunk_index, 6)
+        self.assertTrue(all(results[i].rank >= results[i + 1].rank for i in range(len(results) - 1)))
+
+    def test_section_heading_is_searchable(self):
+        results = retrieval.search('deferred exchanges')
+        self.assertEqual(results[0].section_heading, 'Deferred exchanges')
 
 
 class PipelineTests(TestCase):
@@ -260,6 +283,26 @@ class PipelineTests(TestCase):
         self.assertEqual(result.outcome, ChatExchange.Outcome.DECLINED_ADVICE)
         self.assertTrue(result.answer.startswith(safety.DECLINE_ADVICE))
         self.assertIn(safety.NOT_FOUND, result.answer)
+
+    def test_search_terms_drive_retrieval(self):
+        llm = FakeLLM(
+            triage=Triage(category='educational', standalone_query='What is boot?',
+                          search_terms='like-kind property; productive use'),
+            answer=GroundedAnswer(status='answered', answer='Real property [P1].', cited=['P1']),
+        )
+        result = answer_question('What is boot?', llm=llm)
+        self.assertEqual(result.outcome, ChatExchange.Outcome.ANSWERED)
+        self.assertEqual(result.sources[0].passage.chunk_index, 1)
+        self.assertEqual(llm.answer_calls[0][0], 'What is boot?')
+
+    def test_question_is_searched_when_search_terms_match_nothing(self):
+        llm = FakeLLM(
+            triage=Triage(category='educational', standalone_query='When must replacement property be identified?',
+                          search_terms='zebra; quokka'),
+            answer=GroundedAnswer(status='answered', answer='45 days [P1].', cited=['P1']),
+        )
+        result = answer_question('When must replacement property be identified?', llm=llm)
+        self.assertEqual(result.outcome, ChatExchange.Outcome.ANSWERED)
 
     def test_triage_failure_falls_back_to_keyword_rule(self):
         llm = FakeLLM(triage_error=True, answer=GroundedAnswer(status='answered', answer='45 days [P1].', cited=['P1']))
