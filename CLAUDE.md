@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Sightbridge "Friendly Tax Advisor": a login-protected Q&A chat for financial advisors about 1031 exchanges, Delaware Statutory Trusts (DSTs), 721 exchanges, and REITs. It answers only from an approved document set, cites the passages it used, and logs every exchange for admins. Django + Supabase PostgreSQL + Gemini. It is a take-home exercise; `README.md` is the reader-facing doc (setup, routes, screenshots, deployment, what's left out).
+Sightbridge "Friendly Tax Advisor": a login-protected Q&A chat for financial advisors about 1031 exchanges, Delaware Statutory Trusts (DSTs), 721 exchanges, and REITs. It answers only from an approved document set, cites the passages it used, and logs every exchange for admins. Django + Supabase PostgreSQL + Gemini. It is a take-home exercise. `README.md` is written for the firm's stakeholders (demo link and account, sources, how it was built, results, costs, next steps) and stays non-technical; technical documentation (architecture, setup, environment variables, loading documents, readiness test, Render deployment) is in `docs/DEVELOPER.md`.
 
 Project rules (stack, secrets, row level security, frontend skill, chatbot guardrails) are in `AGENTS.md` and apply here:
 
@@ -76,26 +76,26 @@ Django templates + Bootstrap 5.3.3 (jsDelivr, with SRI hashes) + `static/css/sig
 - **Dev and production share one Supabase project** (the one in `.mcp.json`). `migrate` and any data you write affect both. Django connects with the session pooler URI (port 5432); the transaction pooler (6543) is not supported.
 - There is no SQLite fallback; missing or non-TLS config raises `ImproperlyConfigured`.
 - Tests create a temporary `test_postgres` database on the same server. Supavisor keeps a connection to it open, so `config/test_runner.py` drops it with `DROP DATABASE ... WITH (FORCE)`. If a failed run leaves `test_postgres` behind, drop it that way.
-- Hosting is a Render free web service, configured in the dashboard. The build and start commands, health check path, and environment variables are in README "Deploy to Render" (gunicorn: 1 worker, 4 threads, 90 s timeout). `/healthz` (in `config/urls.py`) is exempt from the HTTPS redirect. `RENDER_EXTERNAL_HOSTNAME` is added to `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` in settings. WhiteNoise serves static files, and `.python-version` pins 3.13. Migrations are not run on deploy, and pre-deploy commands are paid-only. Railway was dropped (no free plan for the user). Gunicorn does not run on Windows, so production mode is only checked locally with `runserver`.
+- Hosting is a Render free web service, configured in the dashboard. The build and start commands, health check path, and environment variables are in `docs/DEVELOPER.md` "Deploy to Render" (gunicorn: 1 worker, 4 threads, 90 s timeout). `/healthz` (in `config/urls.py`) is exempt from the HTTPS redirect. `RENDER_EXTERNAL_HOSTNAME` is added to `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` in settings. WhiteNoise serves static files, and `.python-version` pins 3.13. Migrations are not run on deploy, and pre-deploy commands are paid-only. Railway was dropped (no free plan for the user). Gunicorn does not run on Windows, so production mode is only checked locally with `runserver`.
 - `DEBUG` is off unless `DJANGO_DEBUG=true`; with it off, cookies are secure-only and HTTP redirects to HTTPS.
 
 ## Conventions and pitfalls
 
 - **New table or model**: add a migration that enables RLS (copy `0005_enable_row_level_security_chat_log.py`). `test_row_level_security_enabled_on_all_public_tables` in `chatbot/tests.py` fails if any `public` table lacks it.
-- **New environment variable**: add it to `config/settings.py`, `.env.example`, and the README variable table.
+- **New environment variable**: add it to `config/settings.py`, `.env.example`, and the variable table in `docs/DEVELOPER.md`.
 - **Changing answer behavior**: keep guardrails in code (`safety.py`, `answering.py`), not just in prompts, and add a `FakeLLM` pipeline test in `chatbot/test_chat.py`.
 - **Full-text queries must use the `search_vector` column** (GIN-indexed), not recompute `to_tsvector`; `passage_search_vector()` is only the expression that generates it.
 - **psycopg 3**: pass lists with `= ANY(%s)`; `IN %s` with a tuple does not work.
 - **Citation markers** have no space before them (`text[1].`); the validator and the tests depend on that.
 - **Gemini**: model ids come from Google's pricing page (2026-10-26). Measured on 2026-10-27 with the free tier: `gemini-3.8-flash` gave 503/504 or took over 100 s, `gemini-3.6-flash` took 3-5 s with occasional 503, `gemini-3.5-flash-lite` took about 1 s, and `gemini-2.5-flash` is closed to new users. Thinking level `MINIMAL` is rejected by 3.8 Flash. The free tier may use prompts to improve Google's products, which is why the UI warns users not to enter client details.
 - **Checking Gemini by hand**: tests never call Gemini. To check the key and models, call `chatbot.llm.get_llm()` from a script (with `PYTHONPATH` and `DJANGO_SETTINGS_MODULE` set) and run `triage()` and `answer()` on in-memory sample passages; each check costs a few free-tier requests.
-- **Line endings**: files are LF and Git warns about CRLF conversion (`core.autocrlf=true`). When editing the README from a script, read and write bytes; avoid `sed` with backslashes.
+- **Line endings**: files are LF and Git warns about CRLF conversion (`core.autocrlf=true`). When editing the README or `docs/DEVELOPER.md` from a script, read and write bytes; avoid `sed` with backslashes.
 - **Tooling**: the Bash tool is Git Bash, PowerShell is separate. Scripts run outside `manage.py` need `PYTHONPATH` set to the repo root and `DJANGO_SETTINGS_MODULE=config.settings`. The `gh` CLI is not installed, so pull requests are opened in the browser.
-- README screenshots in `docs/screenshots/` were captured by rendering the templates with sample data and headless Chrome; the scripts are not in the repo. The answer screenshot is sample data, and the README says so.
-- Never put credentials in the repo. Three regular test users exist in the shared database; their passwords are not stored anywhere in the repo.
+- README screenshots in `docs/screenshots/` were captured by rendering the templates with sample data and headless Chrome; the scripts are not in the repo. The answer screenshot is sample data, and the README says so. The login screenshot was re-captured from the running app at 125% scale (1842x1027).
+- Never put credentials in the repo, with one exception the owner chose: the demo account `morgan.hale` (regular, non-staff) and its password are listed in the README for the live demo at https://friendly-tax-advisor.onrender.com/. Two other regular test users exist in the shared database; their passwords are not stored anywhere in the repo.
 
 ## Status and loose ends
 
-As of 2026-10-27 work is on `main`. The six sources are loaded and approved, `run_eval` passes locally, and a superuser exists. The repo is ready for Render (README "Deploy to Render"); the user is creating the service in the dashboard. Then follow README "Production readiness test" steps 5-7. Verify with `git status` and the database before relying on this list.
+As of 2026-10-27 work is on `main`. The six sources are loaded and approved, `run_eval` passes locally, and a superuser exists. Deployed on Render at https://friendly-tax-advisor.onrender.com/ (`docs/DEVELOPER.md` "Deploy to Render"). Then follow `docs/DEVELOPER.md` "Production readiness test" steps 5-7. Verify with `git status` and the database before relying on this list.
 
 Known small items: the rate limit is per process (in-memory cache); there is no login throttling; the free tier allows only 20 `gemini-3.6-flash` requests per day per project, after which every answer comes from the `flash-lite` fallback (measured 2026-10-27).
