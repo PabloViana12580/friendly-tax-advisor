@@ -25,7 +25,7 @@ Rules for anyone (human or AI agent) changing this repository.
 - Keep all credentials in environment variables (`.env` locally, which is git-ignored). Update `.env.example` with placeholders when adding a variable.
 - Never commit credentials, connection strings, or keys, including in docs, tests, or fixtures.
 - Never expose database credentials or privileged Supabase keys (`service_role`, secret keys) to frontend code. Never use a Supabase API key in place of database credentials.
-- Never hardcode user credentials in source, templates, migrations, or docs.
+- Never hardcode user credentials in source, templates, migrations, or docs. The only exception is the public demo account (`morgan.hale`, a regular non-staff user) that the owner chose to list in `README.md`.
 
 ## Chatbot behaviour
 

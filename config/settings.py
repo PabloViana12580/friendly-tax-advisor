@@ -199,7 +199,7 @@ GEMINI_ANSWER_MODEL = os.environ.get('GEMINI_ANSWER_MODEL', 'gemini-3.6-flash')
 # Set to an empty string to disable.
 GEMINI_FALLBACK_MODEL = os.environ.get('GEMINI_FALLBACK_MODEL', 'gemini-3.5-flash-lite')
 # Worst case per question: triage + answer + fallback = 10 + 20 + 20 = 50s,
-# inside gunicorn's 90-second timeout (README "Deploy to Render").
+# inside gunicorn's 90-second timeout (docs/DEVELOPER.md "Deploy to Render").
 GEMINI_TRIAGE_TIMEOUT_SECONDS = int(os.environ.get('GEMINI_TRIAGE_TIMEOUT_SECONDS', '10'))
 GEMINI_ANSWER_TIMEOUT_SECONDS = int(os.environ.get('GEMINI_ANSWER_TIMEOUT_SECONDS', '20'))
 # Questions per user per minute; protects the free-tier quota.
